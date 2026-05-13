@@ -18,6 +18,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'django_filters',
     # Our apps
     'accounts',
     'customers',
@@ -84,6 +85,11 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
 }
 
 from datetime import timedelta
@@ -95,6 +101,10 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:5173',   # React dev server
     'http://127.0.0.1:5173',
+    'http://localhost:5174',   # Fallback port
+    'http://127.0.0.1:5174',
+    'http://localhost:5175',   # Fallback port
+    'http://127.0.0.1:5175',
 ]
 
 LANGUAGE_CODE = 'en-us'

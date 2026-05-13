@@ -1,1 +1,17 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@media print {
+  body > * { display: none; }
+  #receipt-content {
+    display: block !important;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 80mm;
+    border: none !important;
+    box-shadow: none !important;
+    font-size: 12px;
+  }
+}
