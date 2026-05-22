@@ -1,0 +1,222 @@
+import React, { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Checkbox } from '../ui/checkbox';
+import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users } from 'lucide-react';
+import { users, roles, permissions } from '../data/constants';
+import { getStatusBadge } from '../utils/helpers';
+
+export function UsersPage() {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+
+  const filteredUsers = users.filter(user => {
+    const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         user.email.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  const getRoleBadge = (role: string) => {
+    const colors = {
+      'Administrator': 'bg-green-500/20 text-green-600',
+      'Manager': 'bg-blue-500/20 text-blue-600',
+      'Cashier': 'bg-green-500/20 text-green-600',
+      'Inventory Manager': 'bg-purple-500/20 text-purple-600'
+    };
+    return <span className={`px-2 py-1 rounded text-xs ${colors[role as keyof typeof colors] || 'bg-gray-500/20 text-gray-500'}`}>{role}</span>;
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">User Management</h1>
+          <p className="text-gray-500">Manage staff accounts, roles, and permissions</p>
+        </div>
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+              <Plus className="w-4 h-4 mr-2" />
+              Add User
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="bg-white border-gray-200 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900">Add New User</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Input placeholder="Full Name" className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Email Address" type="email" className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Select>
+                <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
+                  <SelectValue placeholder="Select Role" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-100 border-gray-200">
+                  {roles.map(role => (
+                    <SelectItem key={role} value={role}>{role}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="space-y-2">
+                <label className="text-gray-600 text-sm">Permissions</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {permissions.map(permission => (
+                    <div key={permission} className="flex items-center space-x-2">
+                      <Checkbox id={permission} />
+                      <label htmlFor={permission} className="text-sm text-gray-600 capitalize">
+                        {permission}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={() => setIsAddDialogOpen(false)}>Add User</Button>
+                <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <Card className="bg-white border-gray-200">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-500 text-sm">Total Users</p>
+                <p className="text-2xl font-semibold text-gray-900">{users.length}</p>
+              </div>
+              <div className="p-2 bg-blue-500/20 rounded-lg">
+                <Users className="w-6 h-6 text-blue-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-white border-gray-200">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-500 text-sm">Active Users</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {users.filter(u => u.status === 'active').length}
+                </p>
+              </div>
+              <div className="p-2 bg-green-500/20 rounded-lg">
+                <UserCheck className="w-6 h-6 text-green-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-white border-gray-200">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-500 text-sm">Administrators</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {users.filter(u => u.role === 'Administrator').length}
+                </p>
+              </div>
+              <div className="p-2 bg-red-500/20 rounded-lg">
+                <Shield className="w-6 h-6 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-white border-gray-200">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-500 text-sm">Managers</p>
+                <p className="text-2xl font-semibold text-gray-900">
+                  {users.filter(u => u.role === 'Manager').length}
+                </p>
+              </div>
+              <div className="p-2 bg-purple-500/20 rounded-lg">
+                <Search className="w-6 h-6 text-purple-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <Card className="bg-white border-gray-200 mb-6">
+        <CardContent className="p-4">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-4 h-4" />
+              <Input
+                placeholder="Search users by name or email..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 bg-gray-100 border-gray-200 text-gray-900"
+              />
+            </div>
+            <Select value={roleFilter} onValueChange={setRoleFilter}>
+              <SelectTrigger className="w-40 bg-gray-100 border-gray-200 text-gray-900">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-100 border-gray-200">
+                <SelectItem value="all">All Roles</SelectItem>
+                {roles.map(role => (
+                  <SelectItem key={role} value={role}>{role}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Users Table */}
+      <Card className="bg-white border-gray-200">
+        <CardHeader>
+          <CardTitle className="text-gray-900">Staff Members ({filteredUsers.length})</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-gray-200">
+                <TableHead className="text-gray-600">Name</TableHead>
+                <TableHead className="text-gray-600">Email</TableHead>
+                <TableHead className="text-gray-600">Role</TableHead>
+                <TableHead className="text-gray-600">Last Login</TableHead>
+                <TableHead className="text-gray-600">Status</TableHead>
+                <TableHead className="text-gray-600">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredUsers.map(user => (
+                <TableRow key={user.id} className="border-gray-200">
+                  <TableCell className="text-gray-900 font-medium">{user.name}</TableCell>
+                  <TableCell className="text-gray-600">{user.email}</TableCell>
+                  <TableCell>{getRoleBadge(user.role)}</TableCell>
+                  <TableCell className="text-gray-600">{user.lastLogin}</TableCell>
+                  <TableCell>{getStatusBadge(user.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300">
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-300">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
