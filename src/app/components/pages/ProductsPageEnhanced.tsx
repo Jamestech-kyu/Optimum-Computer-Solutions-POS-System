@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -6,8 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Textarea } from '../ui/textarea';
 import { Plus, Search, Edit, Trash2, TrendingUp, BarChart3 } from 'lucide-react';
+import type { POSProduct } from './POSPageEnhanced';
 
 export type UnitOfMeasurement = 'pcs' | 'kg' | 'liter' | 'meter' | 'dozen' | 'box' | 'pack' | 'carton';
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
@@ -25,553 +25,72 @@ export interface Product {
     loyal: number;
   };
   profitMargin: number;
-  uom: UnitOfMeasurement;
+  uom: string;
   stock: number;
   reorderLevel: number;
   image: string;
   tax: number;
 }
 
-const sampleProducts: Product[] = [
-  // Beverages
-  {
-    id: '1',
-    name: 'Coffee Premium Arabica',
-    sku: 'BVRY-COFFE-001',
-    category: 'Beverages',
-    buyingPrice: 3.50,
-    prices: { retail: 9.99, wholesale: 7.99, corporate: 7.00, loyal: 8.50 },
-    profitMargin: 65,
-    uom: 'pcs',
-    stock: 45,
-    reorderLevel: 20,
-    image: 'https://images.unsplash.com/photo-1447933601403-0c6688de566e?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '2',
-    name: 'Orange Juice Fresh 1L',
-    sku: 'BVRY-JUICE-001',
-    category: 'Beverages',
-    buyingPrice: 2.00,
-    prices: { retail: 5.99, wholesale: 4.80, corporate: 4.50, loyal: 5.25 },
-    profitMargin: 66,
-    uom: 'liter',
-    stock: 62,
-    reorderLevel: 30,
-    image: 'https://images.unsplash.com/photo-1600788148184-e2c99d4159f5?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '3',
-    name: 'Whole Milk 1L',
-    sku: 'BVRY-MILK-001',
-    category: 'Beverages',
-    buyingPrice: 1.80,
-    prices: { retail: 4.99, wholesale: 3.99, corporate: 3.75, loyal: 4.40 },
-    profitMargin: 64,
-    uom: 'liter',
-    stock: 58,
-    reorderLevel: 25,
-    image: 'https://images.unsplash.com/photo-1608270861620-7c80fc286000?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '4',
-    name: 'Bottled Water 500ml',
-    sku: 'BVRY-WATER-001',
-    category: 'Beverages',
-    buyingPrice: 0.35,
-    prices: { retail: 1.50, wholesale: 1.15, corporate: 1.00, loyal: 1.30 },
-    profitMargin: 76,
-    uom: 'pcs',
-    stock: 120,
-    reorderLevel: 50,
-    image: 'https://images.unsplash.com/photo-1552106245-1e5a5ea8e6ff?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '5',
-    name: 'Coca Cola 330ml',
-    sku: 'BVRY-COKE-001',
-    category: 'Beverages',
-    buyingPrice: 0.80,
-    prices: { retail: 2.50, wholesale: 2.00, corporate: 1.80, loyal: 2.20 },
-    profitMargin: 67,
-    uom: 'pcs',
-    stock: 95,
-    reorderLevel: 40,
-    image: 'https://images.unsplash.com/photo-1554866585-65fb8c2c18e2?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  // Bakery
-  {
-    id: '6',
-    name: 'Croissant Fresh',
-    sku: 'BKRY-CROSS-001',
-    category: 'Bakery',
-    buyingPrice: 1.20,
-    prices: { retail: 3.50, wholesale: 2.80, corporate: 2.50, loyal: 3.15 },
-    profitMargin: 65,
-    uom: 'pcs',
-    stock: 28,
-    reorderLevel: 10,
-    image: 'https://images.unsplash.com/photo-1549903072-7e6e0bedb7fb?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '7',
-    name: 'Whole Wheat Bread',
-    sku: 'BKRY-BREAD-001',
-    category: 'Bakery',
-    buyingPrice: 1.50,
-    prices: { retail: 4.50, wholesale: 3.60, corporate: 3.25, loyal: 4.05 },
-    profitMargin: 66,
-    uom: 'pcs',
-    stock: 32,
-    reorderLevel: 15,
-    image: 'https://images.unsplash.com/photo-1554737694-b2d2c6944b15?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '8',
-    name: 'Chocolate Donut',
-    sku: 'BKRY-DONUT-001',
-    category: 'Bakery',
-    buyingPrice: 0.90,
-    prices: { retail: 2.75, wholesale: 2.20, corporate: 2.00, loyal: 2.45 },
-    profitMargin: 67,
-    uom: 'pcs',
-    stock: 40,
-    reorderLevel: 15,
-    image: 'https://images.unsplash.com/photo-1585070526059-41e39e0c5b64?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  // Fruits & Vegetables
-  {
-    id: '9',
-    name: 'Bananas',
-    sku: 'FRUT-BNAN-001',
-    category: 'Fruits & Vegetables',
-    buyingPrice: 0.50,
-    prices: { retail: 1.99, wholesale: 1.50, corporate: 1.35, loyal: 1.75 },
-    profitMargin: 74,
-    uom: 'kg',
-    stock: 75,
-    reorderLevel: 30,
-    image: 'https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '10',
-    name: 'Fresh Apples',
-    sku: 'FRUT-APPL-001',
-    category: 'Fruits & Vegetables',
-    buyingPrice: 1.20,
-    prices: { retail: 3.99, wholesale: 3.20, corporate: 2.90, loyal: 3.60 },
-    profitMargin: 70,
-    uom: 'kg',
-    stock: 58,
-    reorderLevel: 25,
-    image: 'https://images.unsplash.com/photo-1560806674-9e4eb207f9d4?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '11',
-    name: 'Tomatoes (Red)',
-    sku: 'VGTB-TOMA-001',
-    category: 'Fruits & Vegetables',
-    buyingPrice: 0.80,
-    prices: { retail: 2.99, wholesale: 2.40, corporate: 2.15, loyal: 2.70 },
-    profitMargin: 71,
-    uom: 'kg',
-    stock: 48,
-    reorderLevel: 20,
-    image: 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '12',
-    name: 'Carrots Fresh',
-    sku: 'VGTB-CARR-001',
-    category: 'Fruits & Vegetables',
-    buyingPrice: 0.60,
-    prices: { retail: 2.49, wholesale: 2.00, corporate: 1.80, loyal: 2.25 },
-    profitMargin: 75,
-    uom: 'kg',
-    stock: 65,
-    reorderLevel: 25,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '13',
-    name: 'Broccoli Florets',
-    sku: 'VGTB-BROC-001',
-    category: 'Fruits & Vegetables',
-    buyingPrice: 1.80,
-    prices: { retail: 5.99, wholesale: 4.80, corporate: 4.35, loyal: 5.40 },
-    profitMargin: 70,
-    uom: 'kg',
-    stock: 35,
-    reorderLevel: 15,
-    image: 'https://images.unsplash.com/photo-1599599810231-0dc8f6b6e11d?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  // Meat & Fish
-  {
-    id: '14',
-    name: 'Chicken Breast Fillet',
-    sku: 'MEAT-CHKN-001',
-    category: 'Meat & Fish',
-    buyingPrice: 6.50,
-    prices: { retail: 16.99, wholesale: 13.60, corporate: 12.25, loyal: 15.30 },
-    profitMargin: 62,
-    uom: 'kg',
-    stock: 28,
-    reorderLevel: 12,
-    image: 'https://images.unsplash.com/photo-1625246333195-78d9c38ad576?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '15',
-    name: 'Ground Beef 1kg',
-    sku: 'MEAT-BEEF-001',
-    category: 'Meat & Fish',
-    buyingPrice: 8.00,
-    prices: { retail: 21.99, wholesale: 17.60, corporate: 15.85, loyal: 19.80 },
-    profitMargin: 63,
-    uom: 'pcs',
-    stock: 22,
-    reorderLevel: 10,
-    image: 'https://images.unsplash.com/photo-1596156988269-f60d0aaa829c?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '16',
-    name: 'Salmon Fillet',
-    sku: 'FISH-SALM-001',
-    category: 'Meat & Fish',
-    buyingPrice: 10.50,
-    prices: { retail: 28.99, wholesale: 23.20, corporate: 20.90, loyal: 26.10 },
-    profitMargin: 64,
-    uom: 'kg',
-    stock: 15,
-    reorderLevel: 8,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  // Dairy & Eggs
-  {
-    id: '17',
-    name: 'Eggs (12 pack)',
-    sku: 'DARI-EGGS-001',
-    category: 'Dairy & Eggs',
-    buyingPrice: 2.50,
-    prices: { retail: 6.99, wholesale: 5.60, corporate: 5.05, loyal: 6.30 },
-    profitMargin: 64,
-    uom: 'dozen',
-    stock: 54,
-    reorderLevel: 20,
-    image: 'https://images.unsplash.com/photo-1611866264904-76a6d1f8eb92?w=100&h=100&fit=crop',
-    tax: 0
-  },
-  {
-    id: '18',
-    name: 'Cheddar Cheese',
-    sku: 'DARI-CHED-001',
-    category: 'Dairy & Eggs',
-    buyingPrice: 4.50,
-    prices: { retail: 12.99, wholesale: 10.40, corporate: 9.35, loyal: 11.70 },
-    profitMargin: 65,
-    uom: 'kg',
-    stock: 32,
-    reorderLevel: 12,
-    image: 'https://images.unsplash.com/photo-1589985643862-18a0174fb7f8?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '19',
-    name: 'Greek Yogurt',
-    sku: 'DARI-YURT-001',
-    category: 'Dairy & Eggs',
-    buyingPrice: 2.00,
-    prices: { retail: 5.99, wholesale: 4.80, corporate: 4.35, loyal: 5.40 },
-    profitMargin: 67,
-    uom: 'pcs',
-    stock: 48,
-    reorderLevel: 18,
-    image: 'https://images.unsplash.com/photo-1488477181946-6dd79ee07e53?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '20',
-    name: 'Butter (500g)',
-    sku: 'DARI-BUTR-001',
-    category: 'Dairy & Eggs',
-    buyingPrice: 3.50,
-    prices: { retail: 9.99, wholesale: 8.00, corporate: 7.20, loyal: 9.00 },
-    profitMargin: 65,
-    uom: 'pcs',
-    stock: 42,
-    reorderLevel: 15,
-    image: 'https://images.unsplash.com/photo-1577810505900-1f76f1a30faa?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  // Frozen Foods
-  {
-    id: '21',
-    name: 'Frozen Pizza',
-    sku: 'FRZN-PZZA-001',
-    category: 'Frozen Foods',
-    buyingPrice: 3.50,
-    prices: { retail: 9.99, wholesale: 8.00, corporate: 7.20, loyal: 9.00 },
-    profitMargin: 65,
-    uom: 'pcs',
-    stock: 38,
-    reorderLevel: 15,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '22',
-    name: 'Frozen Vegetables Mix',
-    sku: 'FRZN-VGTX-001',
-    category: 'Frozen Foods',
-    buyingPrice: 2.50,
-    prices: { retail: 6.99, wholesale: 5.60, corporate: 5.05, loyal: 6.30 },
-    profitMargin: 64,
-    uom: 'kg',
-    stock: 52,
-    reorderLevel: 20,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  // Snacks & Candy
-  {
-    id: '23',
-    name: 'Potato Chips',
-    sku: 'SNCK-CHIP-001',
-    category: 'Snacks & Candy',
-    buyingPrice: 1.50,
-    prices: { retail: 4.49, wholesale: 3.60, corporate: 3.25, loyal: 4.05 },
-    profitMargin: 66,
-    uom: 'pcs',
-    stock: 72,
-    reorderLevel: 30,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '24',
-    name: 'Chocolate Bar',
-    sku: 'SNCK-CHOC-001',
-    category: 'Snacks & Candy',
-    buyingPrice: 0.75,
-    prices: { retail: 2.49, wholesale: 2.00, corporate: 1.80, loyal: 2.25 },
-    profitMargin: 69,
-    uom: 'pcs',
-    stock: 85,
-    reorderLevel: 35,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '25',
-    name: 'Granola Bar',
-    sku: 'SNCK-GRAN-001',
-    category: 'Snacks & Candy',
-    buyingPrice: 1.00,
-    prices: { retail: 2.99, wholesale: 2.40, corporate: 2.15, loyal: 2.70 },
-    profitMargin: 66,
-    uom: 'pcs',
-    stock: 65,
-    reorderLevel: 25,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  // Pantry Staples
-  {
-    id: '26',
-    name: 'Pasta White',
-    sku: 'PNTR-PSTA-001',
-    category: 'Pantry Staples',
-    buyingPrice: 1.20,
-    prices: { retail: 2.99, wholesale: 2.40, corporate: 2.15, loyal: 2.70 },
-    profitMargin: 60,
-    uom: 'pcs',
-    stock: 88,
-    reorderLevel: 35,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '27',
-    name: 'Rice (1kg)',
-    sku: 'PNTR-RICE-001',
-    category: 'Pantry Staples',
-    buyingPrice: 1.80,
-    prices: { retail: 4.49, wholesale: 3.60, corporate: 3.25, loyal: 4.05 },
-    profitMargin: 60,
-    uom: 'pcs',
-    stock: 72,
-    reorderLevel: 30,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '28',
-    name: 'Olive Oil',
-    sku: 'PNTR-OLVE-001',
-    category: 'Pantry Staples',
-    buyingPrice: 5.50,
-    prices: { retail: 14.99, wholesale: 12.00, corporate: 10.80, loyal: 13.50 },
-    profitMargin: 63,
-    uom: 'liter',
-    stock: 28,
-    reorderLevel: 10,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '29',
-    name: 'Canned Tomatoes',
-    sku: 'PNTR-TOMA-001',
-    category: 'Pantry Staples',
-    buyingPrice: 1.00,
-    prices: { retail: 2.49, wholesale: 2.00, corporate: 1.80, loyal: 2.25 },
-    profitMargin: 60,
-    uom: 'pcs',
-    stock: 95,
-    reorderLevel: 40,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  {
-    id: '30',
-    name: 'Peanut Butter',
-    sku: 'PNTR-PBUT-001',
-    category: 'Pantry Staples',
-    buyingPrice: 2.50,
-    prices: { retail: 6.99, wholesale: 5.60, corporate: 5.05, loyal: 6.30 },
-    profitMargin: 64,
-    uom: 'pcs',
-    stock: 48,
-    reorderLevel: 18,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 5
-  },
-  // Health & Beauty
-  {
-    id: '31',
-    name: 'Shampoo',
-    sku: 'HLTH-SHMP-001',
-    category: 'Health & Beauty',
-    buyingPrice: 3.00,
-    prices: { retail: 8.99, wholesale: 7.20, corporate: 6.50, loyal: 8.10 },
-    profitMargin: 66,
-    uom: 'pcs',
-    stock: 35,
-    reorderLevel: 12,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '32',
-    name: 'Toothpaste',
-    sku: 'HLTH-TOTH-001',
-    category: 'Health & Beauty',
-    buyingPrice: 1.50,
-    prices: { retail: 4.49, wholesale: 3.60, corporate: 3.25, loyal: 4.05 },
-    profitMargin: 66,
-    uom: 'pcs',
-    stock: 52,
-    reorderLevel: 20,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '33',
-    name: 'Soap Bar',
-    sku: 'HLTH-SOAP-001',
-    category: 'Health & Beauty',
-    buyingPrice: 0.80,
-    prices: { retail: 2.49, wholesale: 2.00, corporate: 1.80, loyal: 2.25 },
-    profitMargin: 67,
-    uom: 'pcs',
-    stock: 78,
-    reorderLevel: 30,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  // Household Items
-  {
-    id: '34',
-    name: 'Laundry Detergent',
-    sku: 'HSHD-LAUN-001',
-    category: 'Household Items',
-    buyingPrice: 3.50,
-    prices: { retail: 9.99, wholesale: 8.00, corporate: 7.20, loyal: 9.00 },
-    profitMargin: 65,
-    uom: 'pcs',
-    stock: 42,
-    reorderLevel: 16,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '35',
-    name: 'Dish Soap',
-    sku: 'HSHD-DISH-001',
-    category: 'Household Items',
-    buyingPrice: 1.20,
-    prices: { retail: 3.49, wholesale: 2.80, corporate: 2.50, loyal: 3.15 },
-    profitMargin: 65,
-    uom: 'pcs',
-    stock: 65,
-    reorderLevel: 25,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '36',
-    name: 'Paper Towels',
-    sku: 'HSHD-PAPR-001',
-    category: 'Household Items',
-    buyingPrice: 2.00,
-    prices: { retail: 5.49, wholesale: 4.40, corporate: 3.95, loyal: 4.95 },
-    profitMargin: 63,
-    uom: 'pcs',
-    stock: 88,
-    reorderLevel: 35,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  },
-  {
-    id: '37',
-    name: 'Aluminum Foil',
-    sku: 'HSHD-FOIL-001',
-    category: 'Household Items',
-    buyingPrice: 1.80,
-    prices: { retail: 4.99, wholesale: 4.00, corporate: 3.60, loyal: 4.50 },
-    profitMargin: 64,
-    uom: 'pcs',
-    stock: 58,
-    reorderLevel: 22,
-    image: 'https://images.unsplash.com/photo-1599599810694-b5ac4dd5e9a3?w=100&h=100&fit=crop',
-    tax: 10
-  }
-];
-
 const uomOptions: UnitOfMeasurement[] = ['pcs', 'kg', 'liter', 'meter', 'dozen', 'box', 'pack', 'carton'];
 
-export function ProductsPageEnhanced() {
-  const [products, setProducts] = useState<Product[]>(sampleProducts);
+interface ProductsPageEnhancedProps {
+  products?: POSProduct[];
+  openAddProductSignal?: number;
+  onProductCreated?: (product: Product) => Promise<void> | void;
+  readOnly?: boolean;
+}
+
+const mapLiveProduct = (product: POSProduct): Product => {
+  const retail = product.prices.retail || 0;
+  const buyingPrice = Math.max(retail * 0.65, 0);
+
+  return {
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    category: product.category,
+    buyingPrice,
+    prices: product.prices,
+    profitMargin: buyingPrice > 0 ? ((retail - buyingPrice) / buyingPrice) * 100 : 0,
+    uom: product.uom,
+    stock: product.stock,
+    reorderLevel: 5,
+    image: product.image,
+    tax: product.tax
+  };
+};
+
+const readImageAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ''));
+  reader.onerror = () => reject(reader.error);
+  reader.readAsDataURL(file);
+});
+
+export function ProductsPageEnhanced({
+  products: liveProducts,
+  openAddProductSignal = 0,
+  onProductCreated,
+  readOnly = false
+}: ProductsPageEnhancedProps) {
+  const [localProducts, setLocalProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState<Partial<Product>>({});
+  const [imageError, setImageError] = useState('');
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const products = liveProducts ? liveProducts.map(mapLiveProduct) : localProducts;
+
+  useEffect(() => {
+    if (!readOnly && openAddProductSignal > 0) {
+      resetForm();
+      setIsAddDialogOpen(true);
+    }
+  }, [openAddProductSignal, readOnly]);
 
   const categories = ['All', ...new Set(products.map(p => p.category))];
 
@@ -585,6 +104,8 @@ export function ProductsPageEnhanced() {
   const resetForm = () => {
     setFormData({});
     setEditingProduct(null);
+    setImageError('');
+    setFormError('');
   };
 
   const handleOpenDialog = (product?: Product) => {
@@ -601,17 +122,45 @@ export function ProductsPageEnhanced() {
     return ((sellingPrice - buyingPrice) / buyingPrice * 100);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const requiredFields = ['name', 'sku', 'category', 'buyingPrice', 'uom'];
-    if (!requiredFields.every(field => formData[field as keyof Product])) {
-      alert('Please fill all required fields');
+  const handleImageSelected = async (file?: File) => {
+    setImageError('');
+
+    if (!file) {
       return;
     }
 
+    if (!file.type.startsWith('image/')) {
+      setImageError('Choose a valid image file.');
+      return;
+    }
+
+    if (file.size > 1_500_000) {
+      setImageError('Choose an image under 1.5 MB.');
+      return;
+    }
+
+    try {
+      const imageData = await readImageAsDataUrl(file);
+      setFormData(previousFormData => ({ ...previousFormData, image: imageData }));
+    } catch {
+      setImageError('Image could not be loaded. Try another file.');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError('');
+    
+    const requiredFields = ['name', 'sku', 'category', 'buyingPrice', 'uom'];
+    if (!requiredFields.every(field => formData[field as keyof Product])) {
+      setFormError('Please fill all required fields.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
     if (editingProduct) {
-      setProducts(products.map(p => p.id === editingProduct.id ? { ...p, ...formData } as Product : p));
+      setLocalProducts(localProducts.map(p => p.id === editingProduct.id ? { ...p, ...formData } as Product : p));
     } else {
       const newProduct: Product = {
         id: Date.now().toString(),
@@ -627,15 +176,27 @@ export function ProductsPageEnhanced() {
         image: formData.image || '',
         tax: formData.tax || 10
       };
-      setProducts([...products, newProduct]);
+
+      try {
+        await onProductCreated?.(newProduct);
+
+        if (!liveProducts) {
+          setLocalProducts([...localProducts, newProduct]);
+        }
+      } catch (error) {
+        setFormError(error instanceof Error ? error.message : 'Product could not be saved.');
+        setIsSubmitting(false);
+        return;
+      }
     }
     resetForm();
     setIsAddDialogOpen(false);
+    setIsSubmitting(false);
   };
 
   const handleDelete = (id: string) => {
     if (confirm('Delete this product?')) {
-      setProducts(products.filter(p => p.id !== id));
+      setLocalProducts(localProducts.filter(p => p.id !== id));
     }
   };
 
@@ -702,16 +263,17 @@ export function ProductsPageEnhanced() {
             </Select>
           </div>
 
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button 
-                className="bg-blue-600 hover:bg-blue-700"
-                onClick={() => handleOpenDialog()}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add Product
-              </Button>
-            </DialogTrigger>
+          {!readOnly && (
+            <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+              <DialogTrigger asChild>
+                <Button 
+                  className="bg-blue-600 hover:bg-blue-700"
+                  onClick={() => handleOpenDialog()}
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Product
+                </Button>
+              </DialogTrigger>
             <DialogContent className="bg-white border-gray-200 max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingProduct ? 'Edit Product' : 'Add New Product'}</DialogTitle>
@@ -892,6 +454,42 @@ export function ProductsPageEnhanced() {
                   </div>
                 </div>
 
+                {/* Product Image */}
+                <div className="border-t border-gray-200 pt-4">
+                  <p className="font-medium text-gray-900 mb-3">Product Image</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-4 items-start">
+                    <div className="h-28 w-28 rounded-md border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center">
+                      {formData.image ? (
+                        <img
+                          src={formData.image}
+                          alt={formData.name ? `${formData.name} preview` : 'Product preview'}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-500 text-center px-2">No image selected</span>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        className="bg-white border-gray-300"
+                        onChange={(e) => handleImageSelected(e.target.files?.[0])}
+                      />
+                      {formData.image && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setFormData({ ...formData, image: '' })}
+                        >
+                          Remove Image
+                        </Button>
+                      )}
+                      {imageError && <p className="text-sm text-red-600">{imageError}</p>}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Profit Margin Display */}
                 {formData.buyingPrice && formData.prices?.retail && (
                   <div className="bg-green-50 border border-green-200 p-3 rounded-lg">
@@ -914,12 +512,14 @@ export function ProductsPageEnhanced() {
                     Cancel
                   </Button>
                   <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700">
-                    {editingProduct ? 'Update Product' : 'Add Product'}
+                    {isSubmitting ? 'Saving Product...' : editingProduct ? 'Update Product' : 'Add Product'}
                   </Button>
                 </div>
+                {formError && <p className="text-sm text-red-600">{formError}</p>}
               </form>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          )}
         </CardContent>
       </Card>
 
@@ -930,6 +530,7 @@ export function ProductsPageEnhanced() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Image</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Product Name</TableHead>
                   <TableHead>Category</TableHead>
@@ -938,12 +539,19 @@ export function ProductsPageEnhanced() {
                   <TableHead>Retail Price</TableHead>
                   <TableHead>Margin %</TableHead>
                   <TableHead>Stock</TableHead>
-                  <TableHead>Actions</TableHead>
+                  {!readOnly && <TableHead>Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredProducts.map(product => (
                   <TableRow key={product.id}>
+                    <TableCell>
+                      <img
+                        src={product.image}
+                        alt={product.name}
+                        className="h-12 w-12 rounded-md object-cover border border-gray-200 bg-gray-50"
+                      />
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline" className="font-mono text-xs">{product.sku}</Badge>
                     </TableCell>
@@ -964,24 +572,26 @@ export function ProductsPageEnhanced() {
                         {product.stock}
                       </Badge>
                     </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleOpenDialog(product)}
-                        >
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDelete(product.id)}
-                        >
-                          <Trash2 className="w-4 h-4 text-red-600" />
-                        </Button>
-                      </div>
-                    </TableCell>
+                    {!readOnly && (
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleOpenDialog(product)}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDelete(product.id)}
+                          >
+                            <Trash2 className="w-4 h-4 text-red-600" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -992,3 +602,4 @@ export function ProductsPageEnhanced() {
     </div>
   );
 }
+

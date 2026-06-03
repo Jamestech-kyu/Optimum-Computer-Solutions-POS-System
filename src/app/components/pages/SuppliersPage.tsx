@@ -6,20 +6,62 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
-import { Plus, Search, Edit, Eye, Phone, Mail, MapPin, Building } from 'lucide-react';
+import { Plus, Search, Edit, Eye, Phone, Mail, Building, PackagePlus } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
+import { SupplierOrderInvoice, SupplierOrderStatus } from '../../types/supplierOrder';
+import type { POSProduct } from './POSPageEnhanced';
 
-const suppliers = [
-  { id: 1, name: 'Coffee Suppliers Co.', contact: 'James Smith', email: 'james@coffeesuppliers.com', phone: '+254701321073', balance: 2500.00, lastPurchase: '2026-01-15', totalPurchases: 15 },
-  { id: 2, name: 'Fresh Bakery Ltd.', contact: 'Sarah Johnson', email: 'sarah@freshbakery.com', phone: '+254111945360', balance: -150.00, lastPurchase: '2026-01-14', totalPurchases: 8 },
-  { id: 3, name: 'Beverage Distributors', contact: 'Monique Chen', email: 'monique@beveragedist.com', phone: '+254113974804', balance: 750.50, lastPurchase: '2026-01-13', totalPurchases: 22 },
-  { id: 4, name: 'Local Farm Supplies', contact: 'Elvis Davis', email: 'elvis@farmsupp.com', phone: '+254112345678', balance: 0.00, lastPurchase: '2026-01-12', totalPurchases: 5 }
-];
+interface SupplierSummary {
+  id: number;
+  name: string;
+  contact: string;
+  email: string;
+  phone: string;
+  balance: number;
+  lastPurchase: string;
+  totalPurchases: number;
+}
 
-export function SuppliersPage() {
+interface SuppliersPageProps {
+  products: POSProduct[];
+  supplierInvoices: SupplierOrderInvoice[];
+  onSupplierOrderCreated: (invoice: Omit<SupplierOrderInvoice, 'id'>) => void;
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreated }: SuppliersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [selectedSupplier, setSelectedSupplier] = useState<typeof suppliers[0] | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = useState<SupplierSummary | null>(null);
+  const [orderSupplier, setOrderSupplier] = useState<SupplierSummary | null>(null);
+  const [orderForm, setOrderForm] = useState({
+    date: today(),
+    amount: '',
+    items: '1',
+    productId: '',
+    quantityDelivered: '1',
+    paymentMethod: 'Credit',
+    status: 'pending' as SupplierOrderStatus
+  });
+
+  const suppliers = Array.from(
+    supplierInvoices.reduce((map, invoice) => {
+      const existing = map.get(invoice.supplierId);
+      const pendingBalance = invoice.status === 'pending' || invoice.status === 'overdue' ? invoice.amount : 0;
+      map.set(invoice.supplierId, {
+        id: invoice.supplierId,
+        name: invoice.supplierName,
+        contact: invoice.contact || 'Not captured',
+        email: existing?.email || '',
+        phone: existing?.phone || 'Not captured',
+        balance: (existing?.balance || 0) + pendingBalance,
+        lastPurchase: existing && existing.lastPurchase > invoice.date ? existing.lastPurchase : invoice.date,
+        totalPurchases: (existing?.totalPurchases || 0) + 1
+      });
+      return map;
+    }, new Map<number, SupplierSummary>()).values()
+  );
 
   const filteredSuppliers = suppliers.filter(supplier =>
     supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -30,6 +72,56 @@ export function SuppliersPage() {
     if (balance > 0) return <Badge className="bg-green-500/20 text-green-600">Credit: {formatCurrency(balance)}</Badge>;
     if (balance < 0) return <Badge className="bg-red-500/20 text-red-600">Debt: {formatCurrency(Math.abs(balance))}</Badge>;
     return <Badge variant="secondary">Settled</Badge>;
+  };
+
+  const getSupplierInvoices = (supplierId: number) =>
+    supplierInvoices.filter(invoice => invoice.supplierId === supplierId);
+
+  const getSupplierSummary = (supplier: SupplierSummary) => {
+    const invoices = getSupplierInvoices(supplier.id);
+    return {
+      totalPurchases: supplier.totalPurchases,
+      lastPurchase: supplier.lastPurchase,
+      balance: supplier.balance
+    };
+  };
+
+  const openOrderDialog = (supplier: SupplierSummary) => {
+    setOrderSupplier(supplier);
+    setOrderForm({
+      date: today(),
+      amount: '',
+      items: '1',
+      productId: products[0]?.id || '',
+      quantityDelivered: '1',
+      paymentMethod: 'Credit',
+      status: 'pending'
+    });
+  };
+
+  const handleCreateOrder = () => {
+    if (!orderSupplier) return;
+
+    const amount = Number(orderForm.amount);
+    const items = Math.max(1, Number(orderForm.items) || 1);
+    const quantityDelivered = Math.max(1, Number(orderForm.quantityDelivered) || 1);
+    const deliveredProduct = products.find(product => product.id === orderForm.productId) || products[0];
+    if (!amount || amount <= 0) return;
+
+    onSupplierOrderCreated({
+      supplierId: orderSupplier.id,
+      supplierName: orderSupplier.name,
+      contact: orderSupplier.contact,
+      date: orderForm.date || today(),
+      amount,
+      status: orderForm.status,
+      items,
+      paymentMethod: orderForm.paymentMethod,
+      productId: orderForm.status === 'delivered' ? deliveredProduct?.id : undefined,
+      productName: orderForm.status === 'delivered' ? deliveredProduct?.name : undefined,
+      quantityDelivered: orderForm.status === 'delivered' ? quantityDelivered : undefined
+    });
+    setOrderSupplier(null);
   };
 
   return (
@@ -88,7 +180,7 @@ export function SuppliersPage() {
               <div>
                 <p className="text-gray-500 text-sm">Outstanding Balance</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  KSh {suppliers.reduce((sum, s) => sum + Math.max(0, s.balance), 0).toFixed(0)}
+                  KSh {suppliers.reduce((sum, s) => sum + Math.max(0, getSupplierSummary(s).balance), 0).toFixed(0)}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -116,7 +208,7 @@ export function SuppliersPage() {
               <div>
                 <p className="text-gray-500 text-sm">Total Purchases</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {suppliers.reduce((sum, s) => sum + s.totalPurchases, 0)}
+                  {suppliers.reduce((sum, s) => sum + getSupplierSummary(s).totalPurchases, 0)}
                 </p>
               </div>
               <div className="p-2 bg-purple-500/20 rounded-lg">
@@ -178,11 +270,19 @@ export function SuppliersPage() {
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell>{getBalanceBadge(supplier.balance)}</TableCell>
-                  <TableCell className="text-gray-600">{supplier.totalPurchases}</TableCell>
-                  <TableCell className="text-gray-600">{supplier.lastPurchase}</TableCell>
+                  <TableCell>{getBalanceBadge(getSupplierSummary(supplier).balance)}</TableCell>
+                  <TableCell className="text-gray-600">{getSupplierSummary(supplier).totalPurchases}</TableCell>
+                  <TableCell className="text-gray-600">{getSupplierSummary(supplier).lastPurchase}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-orange-600 hover:text-orange-300"
+                        onClick={() => openOrderDialog(supplier)}
+                      >
+                        <PackagePlus className="w-4 h-4" />
+                      </Button>
                       <Button 
                         size="sm" 
                         variant="ghost" 
@@ -230,27 +330,119 @@ export function SuppliersPage() {
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">
                 <div>
                   <p className="text-gray-500 text-xs">Total Purchases</p>
-                  <p className="text-gray-900 font-semibold">{selectedSupplier.totalPurchases}</p>
+                  <p className="text-gray-900 font-semibold">{getSupplierSummary(selectedSupplier).totalPurchases}</p>
                 </div>
                 <div>
                   <p className="text-gray-500 text-xs">Current Balance</p>
-                  <p className={`font-semibold ${selectedSupplier.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    KSh {Math.abs(selectedSupplier.balance).toFixed(2)}
+                  <p className={`font-semibold ${getSupplierSummary(selectedSupplier).balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    KSh {Math.abs(getSupplierSummary(selectedSupplier).balance).toFixed(2)}
                   </p>
                 </div>
                 <div className="col-span-2">
                   <p className="text-gray-500 text-xs">Last Purchase</p>
-                  <p className="text-gray-900 font-semibold">{selectedSupplier.lastPurchase}</p>
+                  <p className="text-gray-900 font-semibold">{getSupplierSummary(selectedSupplier).lastPurchase}</p>
                 </div>
               </div>
 
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => setSelectedSupplier(null)}>
-                  View Purchases
+                <Button className="flex-1" onClick={() => openOrderDialog(selectedSupplier)}>
+                  Record Order
                 </Button>
                 <Button variant="outline" onClick={() => setSelectedSupplier(null)}>
                   Close
                 </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {orderSupplier && (
+        <Dialog open={!!orderSupplier} onOpenChange={() => setOrderSupplier(null)}>
+          <DialogContent className="bg-white border-gray-200 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900">Record Supplier Order</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <p className="text-gray-900 font-medium">{orderSupplier.name}</p>
+                <p className="text-sm text-gray-500">{orderSupplier.contact}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  type="date"
+                  value={orderForm.date}
+                  onChange={(e) => setOrderForm({ ...orderForm, date: e.target.value })}
+                  className="bg-gray-100 border-gray-200 text-gray-900"
+                />
+                <Input
+                  type="number"
+                  min="1"
+                  placeholder="Items"
+                  value={orderForm.items}
+                  onChange={(e) => setOrderForm({ ...orderForm, items: e.target.value })}
+                  className="bg-gray-100 border-gray-200 text-gray-900"
+                />
+              </div>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Order amount"
+                value={orderForm.amount}
+                onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <select
+                  value={orderForm.paymentMethod}
+                  onChange={(e) => setOrderForm({ ...orderForm, paymentMethod: e.target.value })}
+                  className="h-9 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
+                >
+                  <option>Credit</option>
+                  <option>Cash</option>
+                  <option>Bank Transfer</option>
+                  <option>Check</option>
+                </select>
+                <select
+                  value={orderForm.status}
+                  onChange={(e) => setOrderForm({ ...orderForm, status: e.target.value as SupplierOrderStatus })}
+                  className="h-9 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="delivered">Delivered</option>
+                  <option value="paid">Paid</option>
+                  <option value="overdue">Overdue</option>
+                </select>
+              </div>
+              {orderForm.status === 'delivered' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <select
+                    value={orderForm.productId}
+                    onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value })}
+                    className="h-9 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
+                  >
+                    {products.map(product => (
+                      <option key={product.id} value={product.id}>
+                        {product.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Input
+                    type="number"
+                    min="1"
+                    placeholder="Qty delivered"
+                    value={orderForm.quantityDelivered}
+                    onChange={(e) => setOrderForm({ ...orderForm, quantityDelivered: e.target.value })}
+                    className="bg-gray-100 border-gray-200 text-gray-900"
+                  />
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Button className="flex-1" onClick={handleCreateOrder}>
+                  {orderForm.status === 'delivered' ? 'Receive Delivery' : 'Create Invoice'}
+                </Button>
+                <Button variant="outline" onClick={() => setOrderSupplier(null)}>Cancel</Button>
               </div>
             </div>
           </DialogContent>

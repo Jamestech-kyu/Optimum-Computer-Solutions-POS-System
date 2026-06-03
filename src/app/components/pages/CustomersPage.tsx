@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -7,19 +7,61 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Textarea } from '../ui/textarea';
 import { Plus, Search, Edit, Eye, Phone, Mail, MapPin } from 'lucide-react';
+import type { CompletedSale } from './POSPageEnhanced';
 
-const customers = [
-  { id: 1, name: 'Nelly skyler', email: 'nelly@gmail.com', phone: '+254798550825', purchaseCount: 25, loyaltyPoints: 450, totalSpent: 1250.75, lastVisit: '2026-01-15' },
-  { id: 2, name: 'Elvis Smith', email: 'elvis@gmail.com', phone: '+254745920999', purchaseCount: 18, loyaltyPoints: 320, totalSpent: 875.50, lastVisit: '2026-01-14' },
-  { id: 3, name: 'Benard Johnson', email: 'benard@gmail.com', phone: '+254713864921', purchaseCount: 42, loyaltyPoints: 680, totalSpent: 2150.25, lastVisit: '2026-01-13' },
-  { id: 4, name: 'James Brown', email: 'james@gmail.com', phone: '+254111945360', purchaseCount: 8, loyaltyPoints: 120, totalSpent: 425.00, lastVisit: '2026-01-12' },
-  { id: 5, name: 'Charlie Wilson', email: 'charlie@gmail.com', phone: '+254736790566', purchaseCount: 35, loyaltyPoints: 580, totalSpent: 1875.80, lastVisit: '2026-01-10' }
-];
+interface CustomerSummary {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  purchaseCount: number;
+  loyaltyPoints: number;
+  totalSpent: number;
+  lastVisit: string;
+}
 
-export function CustomersPage() {
+interface CustomersPageProps {
+  completedSales: CompletedSale[];
+  openAddCustomerSignal?: number;
+}
+
+const buildCustomersFromSales = (completedSales: CompletedSale[]): CustomerSummary[] => {
+  const summaries = new Map<string, CustomerSummary>();
+
+  completedSales.forEach((sale) => {
+    const name = sale.customer || 'Walk-in Customer';
+    const current = summaries.get(name) ?? {
+      id: summaries.size + 1,
+      name,
+      email: `${name.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '') || 'walkin'}@customer.local`,
+      phone: 'Not captured',
+      purchaseCount: 0,
+      loyaltyPoints: 0,
+      totalSpent: 0,
+      lastVisit: sale.timestamp.toISOString().slice(0, 10)
+    };
+
+    current.purchaseCount += 1;
+    current.totalSpent += sale.amount;
+    current.loyaltyPoints = Math.floor(current.totalSpent / 10);
+    current.lastVisit = sale.timestamp > new Date(current.lastVisit) ? sale.timestamp.toISOString().slice(0, 10) : current.lastVisit;
+    summaries.set(name, current);
+  });
+
+  return Array.from(summaries.values()).sort((a, b) => b.totalSpent - a.totalSpent);
+};
+
+export function CustomersPage({ completedSales, openAddCustomerSignal = 0 }: CustomersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState<typeof customers[0] | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null);
+  const customers = buildCustomersFromSales(completedSales);
+
+  useEffect(() => {
+    if (openAddCustomerSignal > 0) {
+      setIsAddDialogOpen(true);
+    }
+  }, [openAddCustomerSignal]);
 
   const filteredCustomers = customers.filter(customer =>
     customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -100,7 +142,7 @@ export function CustomersPage() {
               <div>
                 <p className="text-gray-500 text-sm">Average Spent</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  KSh {(customers.reduce((sum, c) => sum + c.totalSpent, 0) / customers.length).toFixed(0)}
+                  KSh {(customers.reduce((sum, c) => sum + c.totalSpent, 0) / Math.max(customers.length, 1)).toFixed(0)}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">

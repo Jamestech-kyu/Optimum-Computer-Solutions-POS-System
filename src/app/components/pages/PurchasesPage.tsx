@@ -7,28 +7,28 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Plus, Search, Eye, FileText } from 'lucide-react';
+import type { SupplierOrderInvoice } from '../../types/supplierOrder';
 
-const purchases = [
-  { id: 'PUR-001', supplier: 'Coffee Suppliers Co.', date: '2024-01-15', amount: 1250.00, status: 'completed', items: 5 },
-  { id: 'PUR-002', supplier: 'Fresh Bakery Ltd.', date: '2024-01-14', amount: 875.50, status: 'pending', items: 8 },
-  { id: 'PUR-003', supplier: 'Beverage Distributors', date: '2024-01-13', amount: 2150.25, status: 'completed', items: 12 },
-  { id: 'PUR-004', supplier: 'Local Farm Supplies', date: '2024-01-12', amount: 425.00, status: 'completed', items: 3 },
-  { id: 'PUR-005', supplier: 'Packaging Solutions', date: '2024-01-10', amount: 680.75, status: 'draft', items: 6 }
-];
+interface PurchasesPageProps {
+  supplierInvoices: SupplierOrderInvoice[];
+}
 
-const suppliers = [
-  { id: 1, name: 'Coffee Suppliers Co.' },
-  { id: 2, name: 'Fresh Bakery Ltd.' },
-  { id: 3, name: 'Beverage Distributors' },
-  { id: 4, name: 'Local Farm Supplies' }
-];
-
-export function PurchasesPage() {
+export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const livePurchases = supplierInvoices.map(invoice => ({
+    id: invoice.id.replace('SUP-INV', 'PUR'),
+    supplier: invoice.supplierName,
+    date: invoice.date,
+    amount: invoice.amount,
+    status: invoice.status === 'paid' ? 'completed' : invoice.status === 'delivered' ? 'delivered' : invoice.status === 'overdue' ? 'pending' : invoice.status,
+    items: invoice.items
+  }));
+  const pagePurchases = livePurchases;
+  const pageSuppliers = Array.from(new Map(supplierInvoices.map(invoice => [invoice.supplierId, { id: invoice.supplierId, name: invoice.supplierName }])).values());
 
-  const filteredPurchases = purchases.filter(purchase => {
+  const filteredPurchases = pagePurchases.filter(purchase => {
     const matchesSearch = purchase.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          purchase.supplier.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || purchase.status === statusFilter;
@@ -41,6 +41,8 @@ export function PurchasesPage() {
         return <Badge className="bg-green-500/20 text-green-600">Completed</Badge>;
       case 'pending':
         return <Badge className="bg-orange-500/20 text-orange-600">Pending</Badge>;
+      case 'delivered':
+        return <Badge className="bg-blue-500/20 text-blue-600">Delivered</Badge>;
       case 'draft':
         return <Badge className="bg-gray-500/20 text-gray-500">Draft</Badge>;
       default:
@@ -76,7 +78,7 @@ export function PurchasesPage() {
                       <SelectValue placeholder="Select Supplier" />
                     </SelectTrigger>
                     <SelectContent className="bg-gray-100 border-gray-200">
-                      {suppliers.map(supplier => (
+                      {pageSuppliers.map(supplier => (
                         <SelectItem key={supplier.id} value={supplier.id.toString()}>
                           {supplier.name}
                         </SelectItem>
@@ -140,7 +142,7 @@ export function PurchasesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Total Purchases</p>
-                <p className="text-2xl font-semibold text-gray-900">{purchases.length}</p>
+                <p className="text-2xl font-semibold text-gray-900">{pagePurchases.length}</p>
               </div>
               <div className="p-2 bg-blue-500/20 rounded-lg">
                 <FileText className="w-6 h-6 text-blue-600" />
@@ -154,7 +156,7 @@ export function PurchasesPage() {
               <div>
                 <p className="text-gray-500 text-sm">This Month</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  KSh {purchases.reduce((sum, p) => sum + p.amount, 0).toFixed(0)}
+                  KSh {pagePurchases.reduce((sum, p) => sum + p.amount, 0).toFixed(0)}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -169,7 +171,7 @@ export function PurchasesPage() {
               <div>
                 <p className="text-gray-500 text-sm">Pending Orders</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {purchases.filter(p => p.status === 'pending').length}
+                  {pagePurchases.filter(p => p.status === 'pending').length}
                 </p>
               </div>
               <div className="p-2 bg-orange-500/20 rounded-lg">
@@ -183,7 +185,7 @@ export function PurchasesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Active Suppliers</p>
-                <p className="text-2xl font-semibold text-gray-900">{suppliers.length}</p>
+                <p className="text-2xl font-semibold text-gray-900">{pageSuppliers.length}</p>
               </div>
               <div className="p-2 bg-purple-500/20 rounded-lg">
                 <Search className="w-6 h-6 text-purple-600" />
@@ -214,6 +216,7 @@ export function PurchasesPage() {
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="completed">Completed</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="delivered">Delivered</SelectItem>
                 <SelectItem value="draft">Draft</SelectItem>
               </SelectContent>
             </Select>

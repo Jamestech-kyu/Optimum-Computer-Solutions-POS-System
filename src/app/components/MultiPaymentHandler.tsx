@@ -7,8 +7,9 @@ import { Badge } from './ui/badge';
 import { DollarSign, TrendingUp, TrendingDown, Plus, Trash2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { formatCurrency } from './utils/helpers';
+import { initiateMpesaPayment } from '../services/api';
 
-export type PaymentMethod = 'cash' | 'card' | 'digital' | 'check' | 'bank_transfer';
+export type PaymentMethod = 'cash' | 'card' | 'mpesa' | 'check' | 'bank_transfer';
 
 export interface PaymentTransaction {
   method: PaymentMethod;
@@ -28,31 +29,76 @@ export function MultiPaymentHandler({ totalAmount, onComplete, onCancel }: Multi
   const [currentMethod, setCurrentMethod] = useState<PaymentMethod>('cash');
   const [currentAmount, setCurrentAmount] = useState('');
   const [reference, setReference] = useState('');
+  const [mpesaPhone, setMpesaPhone] = useState('');
+  const [mpesaMessage, setMpesaMessage] = useState('');
+  const [isSendingMpesaPrompt, setIsSendingMpesaPrompt] = useState(false);
 
-  const methods: PaymentMethod[] = ['cash', 'card', 'digital', 'check', 'bank_transfer'];
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
   const remaining = totalAmount - totalPaid;
+  const currentAmountNumber = parseFloat(currentAmount);
 
-  const addPayment = () => {
-    if (!currentAmount || parseFloat(currentAmount) <= 0) {
+  const formatPaymentMethod = (method: PaymentMethod) => {
+    if (method === 'mpesa') return 'M-Pesa';
+    if (method === 'bank_transfer') return 'Bank Transfer';
+    if (method === 'card') return 'Credit/Debit Card';
+    if (method === 'check') return 'Check';
+    return 'Cash';
+  };
+
+  const addPayment = async () => {
+    if (!currentAmount || currentAmountNumber <= 0) {
       alert('Please enter a valid amount');
       return;
     }
-    if (parseFloat(currentAmount) > remaining) {
+    if (currentAmountNumber > remaining) {
       alert(`Amount cannot exceed remaining: ${formatCurrency(remaining)}`);
       return;
     }
 
+    let paymentReference = reference || undefined;
+
+    if (currentMethod === 'mpesa') {
+      if (!mpesaPhone.trim()) {
+        alert('Enter the customer M-Pesa phone number.');
+        return;
+      }
+
+      setIsSendingMpesaPrompt(true);
+      setMpesaMessage('');
+
+      try {
+        const response = await initiateMpesaPayment({
+          phoneNumber: mpesaPhone.trim(),
+          amount: currentAmountNumber,
+          customerName: 'Optimum POS Customer',
+          accountReference: 'Optimum POS'
+        });
+
+        paymentReference = response.transaction?.checkout_request_id || response.message || 'M-Pesa prompt sent';
+        setMpesaMessage(response.demo_mode
+          ? 'Demo M-Pesa request created. Mark it verified in the backend when needed.'
+          : 'M-Pesa prompt sent. Ask the customer to enter their PIN on their phone.'
+        );
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'M-Pesa prompt could not be sent.');
+        setIsSendingMpesaPrompt(false);
+        return;
+      } finally {
+        setIsSendingMpesaPrompt(false);
+      }
+    }
+
     const newPayment: PaymentTransaction = {
       method: currentMethod,
-      amount: parseFloat(currentAmount),
+      amount: currentAmountNumber,
       timestamp: new Date(),
-      reference: reference || undefined
+      reference: paymentReference
     };
 
     setPayments([...payments, newPayment]);
     setCurrentAmount('');
     setReference('');
+    setMpesaPhone('');
   };
 
   const removePayment = (index: number) => {
@@ -72,14 +118,18 @@ export function MultiPaymentHandler({ totalAmount, onComplete, onCancel }: Multi
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="text-sm font-medium text-gray-600">Payment Method</label>
-            <Select value={currentMethod} onValueChange={(val) => setCurrentMethod(val as PaymentMethod)}>
+            <Select value={currentMethod} onValueChange={(val) => {
+              setCurrentMethod(val as PaymentMethod);
+              setReference('');
+              setMpesaMessage('');
+            }}>
               <SelectTrigger className="bg-white border-gray-300">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="card">Credit/Debit Card</SelectItem>
-                <SelectItem value="digital">Digital Wallet</SelectItem>
+                <SelectItem value="mpesa">M-Pesa</SelectItem>
                 <SelectItem value="check">Check</SelectItem>
                 <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
               </SelectContent>
@@ -113,13 +163,31 @@ export function MultiPaymentHandler({ totalAmount, onComplete, onCancel }: Multi
           </div>
         )}
 
+        {currentMethod === 'mpesa' && (
+          <div className="space-y-2 rounded-md border border-green-200 bg-green-50 p-3">
+            <div>
+              <label className="text-sm font-medium text-gray-600">M-Pesa Phone Number</label>
+              <Input
+                value={mpesaPhone}
+                onChange={(e) => setMpesaPhone(e.target.value)}
+                placeholder="e.g. 254712345678"
+                className="bg-white border-gray-300"
+              />
+            </div>
+            <p className="text-xs text-green-700">
+              The backend will send an STK push. The customer enters their M-Pesa PIN on their phone.
+            </p>
+            {mpesaMessage && <p className="text-xs font-medium text-green-700">{mpesaMessage}</p>}
+          </div>
+        )}
+
         <Button 
           onClick={addPayment} 
           className="w-full bg-blue-600 hover:bg-blue-700"
-          disabled={!currentAmount || parseFloat(currentAmount) <= 0}
+          disabled={!currentAmount || currentAmountNumber <= 0 || isSendingMpesaPrompt}
         >
           <Plus className="w-4 h-4 mr-2" />
-          Add Payment
+          {isSendingMpesaPrompt ? 'Sending M-Pesa Prompt...' : currentMethod === 'mpesa' ? 'Send M-Pesa Prompt' : 'Add Payment'}
         </Button>
       </div>
 
@@ -130,7 +198,7 @@ export function MultiPaymentHandler({ totalAmount, onComplete, onCancel }: Multi
           {payments.map((payment, idx) => (
             <div key={idx} className="flex items-center justify-between bg-white p-3 rounded border border-gray-200">
               <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900 capitalize">{payment.method.replace('_', ' ')}</p>
+                <p className="text-sm font-medium text-gray-900">{formatPaymentMethod(payment.method)}</p>
                 {payment.reference && <p className="text-xs text-gray-500">Ref: {payment.reference}</p>}
               </div>
               <div className="flex items-center gap-3">

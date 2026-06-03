@@ -3,27 +3,58 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Lock, User, Eye, EyeOff } from 'lucide-react';
 import { UserRole } from '../../types/auth';
+import { registerAccount } from '../../services/api';
+import type { LoginResult, RegistrationRole } from '../../services/api';
 
 interface LoginPageProps {
-  onLogin: (role: UserRole) => void;
+  onLogin: (username: string, password: string, role: UserRole) => Promise<LoginResult>;
+  onVerifyTwoFactor: (username: string, code: string, role: UserRole) => Promise<LoginResult>;
 }
 
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState('admin@pos.com');
-  const [password, setPassword] = useState('password');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('admin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const selectedRole: UserRole = 'admin';
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState('');
   const [isResetOpen, setIsResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetMessage, setResetMessage] = useState('');
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createUsername, setCreateUsername] = useState('');
+  const [createEmail, setCreateEmail] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [createRole, setCreateRole] = useState<RegistrationRole>('cashier');
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [createMessage, setCreateMessage] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onLogin(selectedRole);
+    setIsSubmitting(true);
+    setLoginError('');
+
+    try {
+      const result = await onLogin(email, password, selectedRole);
+      if (result.twoFactorRequired) {
+        if (!result.verificationCode) {
+          throw new Error('Login requires verification, but no verification code was returned.');
+        }
+
+        await onVerifyTwoFactor(email, result.verificationCode, selectedRole);
+      }
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : '';
+      setLoginError(message || 'Unable to sign in. Check your backend server and credentials.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleResetPassword = (e: React.FormEvent) => {
@@ -34,6 +65,46 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       setResetEmail('');
       setResetMessage('');
     }, 2000);
+  };
+
+  const handleCreateAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError('');
+    setCreateMessage('');
+
+    if (createPassword !== confirmPassword) {
+      setCreateError('Passwords do not match.');
+      return;
+    }
+
+    setIsCreatingAccount(true);
+
+    try {
+      await registerAccount({
+        username: createUsername.trim(),
+        email: createEmail.trim(),
+        password: createPassword,
+        role: createRole
+      });
+
+      setEmail(createUsername.trim());
+      setPassword('');
+      setCreateMessage('Account created. Sign in with your new password.');
+      setCreateUsername('');
+      setCreateEmail('');
+      setCreatePassword('');
+      setConfirmPassword('');
+      setCreateRole('cashier');
+      setTimeout(() => {
+        setIsCreateOpen(false);
+        setCreateMessage('');
+      }, 1600);
+    } catch (error) {
+      console.error(error);
+      setCreateError(error instanceof Error ? error.message : 'Account could not be created.');
+    } finally {
+      setIsCreatingAccount(false);
+    }
   };
 
   return (
@@ -49,15 +120,15 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-600">Email</label>
+              <label className="text-sm font-medium text-gray-600">Username</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-4 h-4" />
                 <Input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-10 bg-gray-100 border-gray-200 text-gray-900"
-                  placeholder="Enter your email"
+                  placeholder="Enter your username"
                   required
                 />
               </div>
@@ -83,20 +154,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-600">Role</label>
-              <Select value={selectedRole} onValueChange={(value) => setSelectedRole(value as UserRole)}>
-                <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="cashier">Cashier</SelectItem>
-                  <SelectItem value="accountant">Accountant</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="flex items-center justify-between">
@@ -140,14 +197,95 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             </div>
 
             <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white">
-              Sign In
+              {isSubmitting ? 'Signing In...' : 'Sign In'}
             </Button>
+            {loginError && (
+              <p className="text-sm text-red-600">{loginError}</p>
+            )}
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-gray-500 text-sm">
-              Don't have an account? <a href="#" className="text-blue-600 hover:text-blue-700">Contact your administrator</a> 
-            </p>
+            <div className="text-gray-500 text-sm">
+              Don't have an account?{' '}
+              <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                <DialogTrigger asChild>
+                  <button type="button" className="text-blue-600 hover:text-blue-700">
+                    Create account
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="bg-white border-gray-200">
+                  <DialogHeader>
+                    <DialogTitle>Create Account</DialogTitle>
+                  </DialogHeader>
+                  <form onSubmit={handleCreateAccount} className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-600">Username</label>
+                      <Input
+                        type="text"
+                        value={createUsername}
+                        onChange={(e) => setCreateUsername(e.target.value)}
+                        className="bg-gray-100 border-gray-200"
+                        placeholder="Choose a username"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-600">Email</label>
+                      <Input
+                        type="email"
+                        value={createEmail}
+                        onChange={(e) => setCreateEmail(e.target.value)}
+                        className="bg-gray-100 border-gray-200"
+                        placeholder="Enter your email"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-600">Role</label>
+                      <select
+                        value={createRole}
+                        onChange={(e) => setCreateRole(e.target.value as RegistrationRole)}
+                        className="w-full h-10 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
+                      >
+                        <option value="cashier">Cashier</option>
+                        <option value="storekeeper">Storekeeper</option>
+                        <option value="manager">Manager</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-600">Password</label>
+                      <Input
+                        type="password"
+                        value={createPassword}
+                        onChange={(e) => setCreatePassword(e.target.value)}
+                        className="bg-gray-100 border-gray-200"
+                        placeholder="Create a password"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-600">Confirm Password</label>
+                      <Input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="bg-gray-100 border-gray-200"
+                        placeholder="Confirm your password"
+                        required
+                      />
+                    </div>
+                    {createError && (
+                      <p className="text-sm text-red-600">{createError}</p>
+                    )}
+                    {createMessage && (
+                      <p className="text-sm text-green-600">{createMessage}</p>
+                    )}
+                    <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isCreatingAccount}>
+                      {isCreatingAccount ? 'Creating Account...' : 'Create Account'}
+                    </Button>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
 
           <div className="mt-6 pt-6 border-t border-gray-200 text-center">

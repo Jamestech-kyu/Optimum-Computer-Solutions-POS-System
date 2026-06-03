@@ -3,9 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Printer, X } from 'lucide-react';
 import { formatCurrency } from './utils/helpers';
+import { getStoredAppSettings } from '../services/settings';
 
 interface ReceiptItem {
   name: string;
+  sku?: string;
   quantity: number;
   uom?: string;
   price: number;
@@ -40,6 +42,15 @@ export function Receipt({
   cashier,
   onClose
 }: ReceiptProps) {
+  const appSettings = getStoredAppSettings();
+  const { businessInfo, invoiceSettings, posSettings } = appSettings;
+  const qrValue = `${transactionId}|${formatCurrency(total)}|${timestamp.toISOString()}`;
+  const barcodeValue = transactionId.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const qrCells = Array.from({ length: 49 }, (_, index) => {
+    const charCode = qrValue.charCodeAt(index % qrValue.length);
+    return ((charCode + index * 7) % 5) < 2;
+  });
+
   const handlePrint = () => {
     window.print();
   };
@@ -75,6 +86,12 @@ export function Receipt({
       <CardContent className="space-y-4 print:space-y-3">
         {/* Header Info */}
         <div className="text-center border-b border-gray-200 pb-3 print:pb-2">
+          <div className="mb-3">
+            <p className="text-lg font-bold text-gray-900">{businessInfo.name}</p>
+            <p className="text-xs text-gray-500">{businessInfo.phone}</p>
+            <p className="text-xs text-gray-500">{businessInfo.address}</p>
+            {businessInfo.taxId && <p className="text-xs text-gray-500">Tax ID: {businessInfo.taxId}</p>}
+          </div>
           <div className="text-sm font-mono">
             <p className="text-gray-600">Transaction ID</p>
             <p className="font-bold text-base">{transactionId}</p>
@@ -110,9 +127,48 @@ export function Receipt({
                   Tax: {formatCurrency(item.price * item.quantity * item.tax / 100)}
                 </div>
               )}
+              {item.sku && (
+                <div className="text-gray-500 text-xs ml-2 font-mono">
+                  SKU/Barcode: {item.sku}
+                </div>
+              )}
             </div>
           ))}
         </div>
+
+        {(posSettings.receiptBarcodeEnabled || posSettings.receiptQrEnabled) && (
+          <div className="grid grid-cols-2 gap-3 border-b border-gray-200 pb-3 print:pb-2">
+            {posSettings.receiptBarcodeEnabled && (
+              <div className="text-center">
+                <p className="mb-2 text-xs font-semibold text-gray-600">Barcode</p>
+                <div className="mx-auto flex h-12 w-36 items-end justify-center gap-[2px] bg-white">
+                  {barcodeValue.split('').map((character, index) => (
+                    <div
+                      key={`${character}-${index}`}
+                      className="bg-gray-900"
+                      style={{
+                        height: `${18 + ((character.charCodeAt(0) + index) % 24)}px`,
+                        width: `${1 + ((character.charCodeAt(0) + index) % 3)}px`
+                      }}
+                    />
+                  ))}
+                </div>
+                <p className="mt-1 break-all text-[10px] font-mono text-gray-500">{barcodeValue}</p>
+              </div>
+            )}
+            {posSettings.receiptQrEnabled && (
+              <div className="text-center">
+                <p className="mb-2 text-xs font-semibold text-gray-600">QR Code</p>
+                <div className="mx-auto grid h-24 w-24 grid-cols-7 gap-[2px] rounded bg-white p-1 ring-1 ring-gray-200">
+                  {qrCells.map((isFilled, index) => (
+                    <div key={index} className={isFilled ? 'bg-gray-900' : 'bg-white'} />
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] font-mono text-gray-500">Scan ref: {transactionId}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Totals */}
         <div className="space-y-2 text-sm print:text-base">
@@ -144,7 +200,7 @@ export function Receipt({
 
         {/* Footer */}
         <div className="text-center text-xs text-gray-500 border-t border-gray-200 pt-3 print:pt-2">
-          <p className="mb-1">Thank you for your purchase!</p>
+          <p className="mb-1">{invoiceSettings.footerNote}</p>
           <p className="text-gray-400">Please keep this receipt for your records</p>
         </div>
 

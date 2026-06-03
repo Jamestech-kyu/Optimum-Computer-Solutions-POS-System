@@ -5,7 +5,6 @@ import {
   FileText,
   Users,
   Package,
-  ShoppingBag,
   Truck,
   BarChart3,
   CreditCard,
@@ -13,25 +12,23 @@ import {
   UserCheck,
   Settings,
   LogOut,
-  DollarSign
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { UserRole } from '../types/auth';
 
 const allMenuItems = [
-  { icon: Home, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'cashier', 'accountant'] },
-  { icon: ShoppingCart, label: 'POS / Sales', id: 'pos', roles: ['admin', 'cashier'] },
-  { icon: FileText, label: 'Invoices', id: 'invoices', roles: ['admin', 'cashier', 'accountant'] },
-  { icon: Users, label: 'Customers', id: 'customers', roles: ['admin', 'cashier'] },
-  { icon: Package, label: 'Products / Items', id: 'products', roles: ['admin'] },
-  { icon: ShoppingBag, label: 'Purchases', id: 'purchases', roles: ['admin'] },
-  { icon: Truck, label: 'Suppliers', id: 'suppliers', roles: ['admin'] },
-  { icon: BarChart3, label: 'Inventory', id: 'inventory', roles: ['admin'] },
-  { icon: CreditCard, label: 'Expenses', id: 'expenses', roles: ['admin', 'accountant'] },
-  { icon: TrendingUp, label: 'Reports', id: 'reports', roles: ['admin', 'accountant'] },
-  { icon: UserCheck, label: 'Users / Staff', id: 'users', roles: ['admin'] },
-  { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin'] }
+  { icon: Home, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'manager', 'cashier', 'storekeeper', 'accountant'] },
+  { icon: ShoppingCart, label: 'POS / Sales', id: 'pos', roles: ['admin', 'manager', 'cashier'] },
+  { icon: FileText, label: 'Invoices', id: 'invoices', roles: ['admin', 'manager', 'cashier', 'accountant'] },
+  { icon: Users, label: 'Customers', id: 'customers', roles: ['admin', 'manager', 'cashier'] },
+  { icon: Package, label: 'Products / Items', id: 'products', roles: ['admin', 'manager', 'storekeeper'] },
+  { icon: Truck, label: 'Procurement', id: 'procurement', roles: ['admin', 'manager', 'storekeeper'] },
+  { icon: BarChart3, label: 'Inventory', id: 'inventory', roles: ['admin', 'manager', 'storekeeper'] },
+  { icon: CreditCard, label: 'Expenses', id: 'expenses', roles: ['admin', 'manager', 'accountant'] },
+  { icon: TrendingUp, label: 'Reports', id: 'reports', roles: ['admin', 'manager', 'accountant'] },
+  { icon: UserCheck, label: 'Users / Staff', id: 'users', roles: ['admin', 'manager'] },
+  { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin', 'manager'] }
 ];
 
 interface SidebarProps {
@@ -55,6 +52,12 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
         return 'bg-blue-100 text-blue-800';
       case 'accountant':
         return 'bg-purple-100 text-purple-800';
+      case 'manager':
+        return 'bg-emerald-100 text-emerald-800';
+      case 'storekeeper':
+        return 'bg-amber-100 text-amber-800';
+      case 'customer':
+        return 'bg-gray-100 text-gray-800';
     }
   };
 
@@ -62,7 +65,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
     <div className="w-60 h-screen bg-white border-r border-gray-200 flex flex-col shadow-sm">
       {/* Logo/Brand */}
       <div className="p-5 border-b border-gray-100">
-        <h2 className="text-gray-900 font-semibold text-lg tracking-tight">POS System</h2>
+        <h2 className="text-gray-900 font-semibold text-lg tracking-tight">SALES ENTRY & RECEIPT</h2>
         <p className="text-gray-400 text-xs mt-0.5">Management System</p>
       </div>
 

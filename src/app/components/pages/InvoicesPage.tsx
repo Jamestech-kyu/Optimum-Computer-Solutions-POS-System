@@ -1,26 +1,64 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Badge } from '../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Search, Eye, Download, Send, Plus, FileText } from 'lucide-react';
+import { SupplierOrderInvoice } from '../../types/supplierOrder';
+import type { CompletedSale } from './POSPageEnhanced';
 
-const invoices = [
-  { id: 'INV-001', customer: 'James Smith', date: '2024-01-15', amount: 125.50, status: 'paid', items: 3, paymentMethod: 'Card' },
-  { id: 'INV-002', customer: 'Nelly Joe', date: '2024-01-15', amount: 89.25, status: 'pending', items: 2, paymentMethod: 'Cash' },
-  { id: 'INV-003', customer: 'Silyvia Johnson', date: '2024-01-14', amount: 245.75, status: 'paid', items: 5, paymentMethod: 'Digital' },
-  { id: 'INV-004', customer: 'Alice Brown', date: '2024-01-14', amount: 67.80, status: 'overdue', items: 2, paymentMethod: 'Card' },
-  { id: 'INV-005', customer: 'Charlie Wilson', date: '2024-01-13', amount: 156.90, status: 'paid', items: 4, paymentMethod: 'Cash' }
-];
+interface InvoicesPageProps {
+  supplierInvoices: SupplierOrderInvoice[];
+  completedSales: CompletedSale[];
+  openNewInvoiceSignal?: number;
+  onStartSale?: () => void;
+  onRecordSupplierOrder?: () => void;
+}
 
-export function InvoicesPage() {
+export function InvoicesPage({
+  supplierInvoices,
+  completedSales,
+  openNewInvoiceSignal = 0,
+  onStartSale,
+  onRecordSupplierOrder
+}: InvoicesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
+  const [isNewInvoiceDialogOpen, setIsNewInvoiceDialogOpen] = useState(false);
 
-  const filteredInvoices = invoices.filter(invoice => {
+  useEffect(() => {
+    if (openNewInvoiceSignal > 0) {
+      setIsNewInvoiceDialogOpen(true);
+    }
+  }, [openNewInvoiceSignal]);
+  const allInvoices = [
+    ...supplierInvoices.map(invoice => ({
+      id: invoice.id,
+      customer: invoice.supplierName,
+      date: invoice.date,
+      amount: invoice.amount,
+      status: invoice.status,
+      items: invoice.items,
+      paymentMethod: invoice.paymentMethod,
+      type: 'Supplier'
+    })),
+    ...completedSales.map(sale => ({
+      id: sale.id,
+      customer: sale.customer,
+      date: sale.timestamp.toISOString().slice(0, 10),
+      amount: sale.amount,
+      status: 'paid',
+      items: sale.items.length,
+      paymentMethod: sale.method || 'Cash',
+      type: 'Customer'
+    }))
+  ];
+
+  const filteredInvoices = allInvoices.filter(invoice => {
     const matchesSearch = invoice.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          invoice.customer.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || invoice.status === statusFilter;
@@ -33,6 +71,8 @@ export function InvoicesPage() {
         return <Badge className="bg-green-500/20 text-green-600">Paid</Badge>;
       case 'pending':
         return <Badge className="bg-orange-500/20 text-orange-600">Pending</Badge>;
+      case 'delivered':
+        return <Badge className="bg-blue-500/20 text-blue-600">Delivered</Badge>;
       case 'overdue':
         return <Badge className="bg-red-500/20 text-red-600">Overdue</Badge>;
       default:
@@ -62,12 +102,42 @@ export function InvoicesPage() {
             <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
-          <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => setIsNewInvoiceDialogOpen(true)}>
             <Plus className="w-4 h-4 mr-2" />
             New Invoice
           </Button>
         </div>
       </div>
+
+      <Dialog open={isNewInvoiceDialogOpen} onOpenChange={setIsNewInvoiceDialogOpen}>
+        <DialogContent className="bg-white border-gray-200 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900">Create Invoice</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <Button
+              className="justify-start bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => {
+                setIsNewInvoiceDialogOpen(false);
+                onStartSale?.();
+              }}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Customer Sale Invoice
+            </Button>
+            <Button
+              className="justify-start bg-orange-600 hover:bg-orange-700 text-white"
+              onClick={() => {
+                setIsNewInvoiceDialogOpen(false);
+                onRecordSupplierOrder?.();
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Supplier Order Invoice
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -76,7 +146,7 @@ export function InvoicesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Total Invoices</p>
-                <p className="text-2xl font-semibold text-gray-900">{invoices.length}</p>
+                <p className="text-2xl font-semibold text-gray-900">{allInvoices.length}</p>
               </div>
               <div className="p-2 bg-blue-500/20 rounded-lg">
                 <FileText className="w-6 h-6 text-blue-600" />
@@ -90,7 +160,7 @@ export function InvoicesPage() {
               <div>
                 <p className="text-gray-500 text-sm">Total Amount</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  KSh {invoices.reduce((sum, inv) => sum + inv.amount, 0).toFixed(0)}
+                  KSh {allInvoices.reduce((sum, inv) => sum + inv.amount, 0).toFixed(0)}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -105,7 +175,7 @@ export function InvoicesPage() {
               <div>
                 <p className="text-gray-500 text-sm">Paid Invoices</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {invoices.filter(inv => inv.status === 'paid').length}
+                  {allInvoices.filter(inv => inv.status === 'paid').length}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -120,7 +190,7 @@ export function InvoicesPage() {
               <div>
                 <p className="text-gray-500 text-sm">Overdue</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {invoices.filter(inv => inv.status === 'overdue').length}
+                  {allInvoices.filter(inv => inv.status === 'overdue').length}
                 </p>
               </div>
               <div className="p-2 bg-red-500/20 rounded-lg">
@@ -152,6 +222,7 @@ export function InvoicesPage() {
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="delivered">Delivered</SelectItem>
                 <SelectItem value="overdue">Overdue</SelectItem>
               </SelectContent>
             </Select>
@@ -180,7 +251,8 @@ export function InvoicesPage() {
             <TableHeader>
               <TableRow className="border-gray-200">
                 <TableHead className="text-gray-600">Invoice ID</TableHead>
-                <TableHead className="text-gray-600">Customer</TableHead>
+                <TableHead className="text-gray-600">Party</TableHead>
+                <TableHead className="text-gray-600">Type</TableHead>
                 <TableHead className="text-gray-600">Date</TableHead>
                 <TableHead className="text-gray-600">Amount</TableHead>
                 <TableHead className="text-gray-600">Items</TableHead>
@@ -194,6 +266,11 @@ export function InvoicesPage() {
                 <TableRow key={invoice.id} className="border-gray-200">
                   <TableCell className="text-blue-600 font-medium">{invoice.id}</TableCell>
                   <TableCell className="text-gray-900">{invoice.customer}</TableCell>
+                  <TableCell>
+                    <Badge className={invoice.type === 'Supplier' ? 'bg-orange-500/20 text-orange-600' : 'bg-blue-500/20 text-blue-600'}>
+                      {invoice.type}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-gray-600">{invoice.date}</TableCell>
                   <TableCell className="text-green-600">KSh {invoice.amount.toFixed(2)}</TableCell>
                   <TableCell className="text-gray-600">{invoice.items} items</TableCell>

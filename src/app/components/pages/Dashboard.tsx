@@ -2,17 +2,20 @@ import React from 'react';
 import { KPICards } from '../KPICards';
 import { Charts } from '../Charts';
 import { DataTables } from '../DataTables';
-import { QuickActions } from '../QuickActions';
+import { QuickActions, type QuickActionId } from '../QuickActions';
 import type { CompletedSale, DayBalance, POSProduct } from './POSPageEnhanced';
+import type { UserRole } from '../../types/auth';
 
 interface DashboardProps {
   products: POSProduct[];
   completedSales: CompletedSale[];
   dayBalance: DayBalance;
   cashSalesToday: number;
+  userRole: UserRole;
+  onQuickAction: (action: QuickActionId) => void;
 }
 
-export function Dashboard({ products, completedSales, dayBalance, cashSalesToday }: DashboardProps) {
+export function Dashboard({ products, completedSales, dayBalance, cashSalesToday, userRole, onQuickAction }: DashboardProps) {
   return (
     <div>
       {/* Header */}
@@ -30,13 +33,13 @@ export function Dashboard({ products, completedSales, dayBalance, cashSalesToday
       />
 
       {/* Charts Section */}
-      <Charts />
+      <Charts completedSales={completedSales} />
 
       {/* Data Tables */}
       <DataTables products={products} completedSales={completedSales} />
 
       {/* Quick Actions and Staff Leaderboard */}
-      <QuickActions />
+      <QuickActions completedSales={completedSales} userRole={userRole} onAction={onQuickAction} />
     </div>
   );
 }

@@ -1,31 +1,204 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Badge } from '../ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Search, AlertTriangle, TrendingDown, TrendingUp, Package, Plus } from 'lucide-react';
+import { Search, AlertTriangle, TrendingDown, TrendingUp, Package, Plus, Upload, Download } from 'lucide-react';
+import type { StockMovement } from '../../types/supplierOrder';
+import type { POSProduct } from './POSPageEnhanced';
+import type { Product } from './ProductsPageEnhanced';
+import type { ProductExcelImportResult } from '../../services/api';
 
-const inventory = [
-  { id: 1, name: 'Coffee Premium', current: 25, reorderLevel: 50, location: 'Storage A1', category: 'Beverages', cost: 3.50, selling: 4.50 },
-  { id: 2, name: 'Croissant', current: 15, reorderLevel: 30, location: 'Kitchen B1', category: 'Bakery', cost: 2.00, selling: 3.25 },
-  { id: 3, name: 'Green Tea', current: 45, reorderLevel: 20, location: 'Storage A2', category: 'Beverages', cost: 2.25, selling: 3.00 },
-  { id: 4, name: 'Paper Cups', current: 5, reorderLevel: 100, location: 'Storage C1', category: 'Supplies', cost: 0.05, selling: 0.00 },
-  { id: 5, name: 'Milk Cartons', current: 8, reorderLevel: 25, location: 'Fridge A1', category: 'Dairy', cost: 1.80, selling: 0.50 }
-];
+interface InventoryPageProps {
+  products: POSProduct[];
+  stockMovements: StockMovement[];
+  openAddItemSignal?: number;
+  onStockAdjustment: (productId: string, type: 'in' | 'out', quantity: number, reason: string) => void;
+  onAddItem: (product: Product) => Promise<void> | void;
+  onBulkImportItems: (file: File) => Promise<ProductExcelImportResult>;
+  onDownloadImportTemplate: () => Promise<void>;
+}
 
-const stockMovements = [
-  { id: 1, item: 'Coffee Premium', type: 'in', quantity: 20, date: '2024-01-15', reason: 'Purchase Order #PUR-001' },
-  { id: 2, item: 'Croissant', type: 'out', quantity: -5, date: '2024-01-15', reason: 'Daily Sales' },
-  { id: 3, item: 'Paper Cups', type: 'out', quantity: -25, date: '2024-01-14', reason: 'Daily Sales' },
-  { id: 4, item: 'Green Tea', type: 'in', quantity: 15, date: '2024-01-14', reason: 'Stock Adjustment' }
-];
+const getReorderLevel = (product: POSProduct) => {
+  if (product.category === 'Beverages') return 20;
+  if (product.category === 'Bakery' || product.category === 'Food') return 12;
+  return 10;
+};
+const getLocation = (category: string) => {
+  if (category === 'Bakery' || category === 'Food') return 'Kitchen B1';
+  if (category === 'Dairy') return 'Fridge A1';
+  if (category === 'Supplies') return 'Storage C1';
+  return 'Storage A1';
+};
 
-export function InventoryPage() {
+export function InventoryPage({
+  products,
+  stockMovements,
+  openAddItemSignal = 0,
+  onStockAdjustment,
+  onAddItem,
+  onBulkImportItems,
+  onDownloadImportTemplate
+}: InventoryPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [adjustmentType, setAdjustmentType] = useState<'in' | 'out' | null>(null);
+  const [adjustmentForm, setAdjustmentForm] = useState({
+    productId: '',
+    quantity: '1',
+    reason: ''
+  });
+  const [isAddItemOpen, setIsAddItemOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+  const [bulkImportFile, setBulkImportFile] = useState<File | null>(null);
+  const [bulkImportMessage, setBulkImportMessage] = useState('');
+  const [bulkImportErrors, setBulkImportErrors] = useState<ProductExcelImportResult['errors']>([]);
+  const [isBulkImporting, setIsBulkImporting] = useState(false);
+  const [isTemplateDownloading, setIsTemplateDownloading] = useState(false);
+  const [addItemForm, setAddItemForm] = useState({
+    name: '',
+    sku: '',
+    category: '',
+    uom: 'pcs',
+    buyingPrice: '',
+    retailPrice: '',
+    wholesalePrice: '',
+    corporatePrice: '',
+    loyalPrice: '',
+    stock: '0',
+    reorderLevel: '0',
+    tax: '10'
+  });
+  const [formError, setFormError] = useState('');
+
+  useEffect(() => {
+    if (openAddItemSignal > 0) {
+      setIsAddItemOpen(true);
+    }
+  }, [openAddItemSignal]);
+
+  const openAdjustmentDialog = (type: 'in' | 'out') => {
+    setFormError('');
+    setAdjustmentType(type);
+    setAdjustmentForm({
+      productId: products[0]?.id || '',
+      quantity: '1',
+      reason: type === 'in' ? 'Stock received' : 'Stock removed'
+    });
+  };
+
+  const handleStockAdjustment = () => {
+    setFormError('');
+    const quantity = Number(adjustmentForm.quantity);
+    if (!adjustmentType || !adjustmentForm.productId || quantity <= 0) {
+      setFormError('Select an item and enter a quantity greater than zero.');
+      return;
+    }
+
+    onStockAdjustment(adjustmentForm.productId, adjustmentType, quantity, adjustmentForm.reason || (adjustmentType === 'in' ? 'Stock in' : 'Stock out'));
+    setAdjustmentType(null);
+  };
+
+  const handleAddItem = async () => {
+    setFormError('');
+    if (!addItemForm.name || !addItemForm.sku || !addItemForm.category) {
+      setFormError('Enter item name, SKU, and category.');
+      return;
+    }
+
+    const retailPrice = Number(addItemForm.retailPrice) || 0;
+    const wholesalePrice = Number(addItemForm.wholesalePrice) || retailPrice;
+    const corporatePrice = Number(addItemForm.corporatePrice) || wholesalePrice || retailPrice;
+    const loyalPrice = Number(addItemForm.loyalPrice) || retailPrice;
+    const buyingPrice = Number(addItemForm.buyingPrice) || 0;
+
+    await onAddItem({
+      id: Date.now().toString(),
+      name: addItemForm.name,
+      sku: addItemForm.sku,
+      category: addItemForm.category,
+      buyingPrice,
+      prices: {
+        retail: retailPrice,
+        wholesale: wholesalePrice,
+        corporate: corporatePrice,
+        loyal: loyalPrice
+      },
+      profitMargin: buyingPrice > 0 ? ((retailPrice - buyingPrice) / buyingPrice) * 100 : 0,
+      uom: addItemForm.uom,
+      stock: Number(addItemForm.stock) || 0,
+      reorderLevel: Number(addItemForm.reorderLevel) || 0,
+      image: '',
+      tax: Number(addItemForm.tax) || 0
+    });
+
+    setAddItemForm({
+      name: '',
+      sku: '',
+      category: '',
+      uom: 'pcs',
+      buyingPrice: '',
+      retailPrice: '',
+      wholesalePrice: '',
+      corporatePrice: '',
+      loyalPrice: '',
+      stock: '0',
+      reorderLevel: '0',
+      tax: '10'
+    });
+    setIsAddItemOpen(false);
+  };
+
+  const handleDownloadTemplate = async () => {
+    setFormError('');
+    setIsTemplateDownloading(true);
+
+    try {
+      await onDownloadImportTemplate();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Product template could not be downloaded.');
+    } finally {
+      setIsTemplateDownloading(false);
+    }
+  };
+
+  const handleBulkImport = async () => {
+    setBulkImportMessage('');
+    setBulkImportErrors([]);
+
+    if (!bulkImportFile) {
+      setFormError('Choose an Excel file to import.');
+      return;
+    }
+
+    setFormError('');
+    setIsBulkImporting(true);
+
+    try {
+      const result = await onBulkImportItems(bulkImportFile);
+      setBulkImportMessage(`Imported ${result.created} new item${result.created === 1 ? '' : 's'} and updated ${result.updated} item${result.updated === 1 ? '' : 's'}.`);
+      setBulkImportErrors(result.errors || []);
+      setBulkImportFile(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Products could not be imported.');
+    } finally {
+      setIsBulkImporting(false);
+    }
+  };
+  const inventory = products.map(product => ({
+    id: product.id,
+    name: product.name,
+    current: product.stock,
+    reorderLevel: getReorderLevel(product),
+    location: getLocation(product.category),
+    category: product.category,
+    cost: product.prices.wholesale,
+    selling: product.prices.retail
+  }));
 
   const filteredInventory = inventory.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -50,21 +223,168 @@ export function InventoryPage() {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Inventory Management</h1>
           <p className="text-gray-500">Monitor stock levels and inventory movements</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => openAdjustmentDialog('in')}>
             <TrendingUp className="w-4 h-4 mr-2" />
             Stock In
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={() => openAdjustmentDialog('out')}>
             <TrendingDown className="w-4 h-4 mr-2" />
             Stock Out
           </Button>
-          <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={() => {
+            setFormError('');
+            setIsAddItemOpen(true);
+          }}>
             <Plus className="w-4 h-4 mr-2" />
             Add Item
           </Button>
+          <Button variant="outline" onClick={handleDownloadTemplate} disabled={isTemplateDownloading}>
+            <Download className="w-4 h-4 mr-2" />
+            {isTemplateDownloading ? 'Downloading...' : 'Excel Template'}
+          </Button>
+          <Button variant="outline" onClick={() => {
+            setFormError('');
+            setBulkImportMessage('');
+            setBulkImportErrors([]);
+            setIsBulkImportOpen(true);
+          }}>
+            <Upload className="w-4 h-4 mr-2" />
+            Import Excel
+          </Button>
         </div>
       </div>
+
+      <Dialog open={!!adjustmentType} onOpenChange={(open) => !open && setAdjustmentType(null)}>
+        <DialogContent className="bg-white border-gray-200 max-w-md">
+          <DialogHeader>
+            <DialogTitle>{adjustmentType === 'in' ? 'Stock In' : 'Stock Out'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-gray-600 mb-2 block">Item</label>
+              <Select
+                value={adjustmentForm.productId}
+                onValueChange={(value) => setAdjustmentForm({ ...adjustmentForm, productId: value })}
+              >
+                <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
+                  <SelectValue placeholder="Select item" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-100 border-gray-200">
+                  {products.map(product => (
+                    <SelectItem key={product.id} value={product.id}>
+                      {product.name} ({product.stock} {product.uom})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 mb-2 block">Quantity</label>
+              <Input
+                type="number"
+                min="1"
+                value={adjustmentForm.quantity}
+                onChange={(e) => setAdjustmentForm({ ...adjustmentForm, quantity: e.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 mb-2 block">Reason</label>
+              <Input
+                value={adjustmentForm.reason}
+                onChange={(e) => setAdjustmentForm({ ...adjustmentForm, reason: e.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
+            </div>
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+            <div className="flex gap-2">
+              <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleStockAdjustment}>
+                Save
+              </Button>
+              <Button variant="outline" onClick={() => setAdjustmentType(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddItemOpen} onOpenChange={setIsAddItemOpen}>
+        <DialogContent className="bg-white border-gray-200 max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add Inventory Item</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input placeholder="Item name" value={addItemForm.name} onChange={(e) => setAddItemForm({ ...addItemForm, name: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="SKU" value={addItemForm.sku} onChange={(e) => setAddItemForm({ ...addItemForm, sku: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Category" value={addItemForm.category} onChange={(e) => setAddItemForm({ ...addItemForm, category: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Unit of measure" value={addItemForm.uom} onChange={(e) => setAddItemForm({ ...addItemForm, uom: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Buying price" value={addItemForm.buyingPrice} onChange={(e) => setAddItemForm({ ...addItemForm, buyingPrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Retail price" value={addItemForm.retailPrice} onChange={(e) => setAddItemForm({ ...addItemForm, retailPrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Wholesale price" value={addItemForm.wholesalePrice} onChange={(e) => setAddItemForm({ ...addItemForm, wholesalePrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Corporate price" value={addItemForm.corporatePrice} onChange={(e) => setAddItemForm({ ...addItemForm, corporatePrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Loyal price" value={addItemForm.loyalPrice} onChange={(e) => setAddItemForm({ ...addItemForm, loyalPrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Opening stock" value={addItemForm.stock} onChange={(e) => setAddItemForm({ ...addItemForm, stock: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Reorder level" value={addItemForm.reorderLevel} onChange={(e) => setAddItemForm({ ...addItemForm, reorderLevel: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input type="number" placeholder="Tax %" value={addItemForm.tax} onChange={(e) => setAddItemForm({ ...addItemForm, tax: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+            </div>
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+            <div className="flex gap-2">
+              <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleAddItem}>
+                Add Item
+              </Button>
+              <Button variant="outline" onClick={() => setIsAddItemOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBulkImportOpen} onOpenChange={setIsBulkImportOpen}>
+        <DialogContent className="bg-white border-gray-200 max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Import Items from Excel</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              Use the product import template, then upload the completed `.xlsx` file here.
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600 mb-2 block">Excel File</label>
+              <Input
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="bg-gray-100 border-gray-200 text-gray-900"
+                onChange={(event) => {
+                  setBulkImportFile(event.target.files?.[0] || null);
+                  setBulkImportMessage('');
+                  setBulkImportErrors([]);
+                }}
+              />
+            </div>
+            {bulkImportMessage && <p className="text-sm text-green-600">{bulkImportMessage}</p>}
+            {bulkImportErrors.length > 0 && (
+              <div className="max-h-32 overflow-y-auto rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {bulkImportErrors.map(error => (
+                  <p key={`${error.row}-${error.message}`}>Row {error.row}: {error.message}</p>
+                ))}
+              </div>
+            )}
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+            <div className="flex gap-2">
+              <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleBulkImport} disabled={isBulkImporting}>
+                {isBulkImporting ? 'Importing...' : 'Import Items'}
+              </Button>
+              <Button variant="outline" onClick={() => setIsBulkImportOpen(false)}>
+                Close
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

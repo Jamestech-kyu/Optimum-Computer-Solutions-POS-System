@@ -8,21 +8,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import { Plus, Search, Edit, Trash2, Receipt, TrendingDown } from 'lucide-react';
-
-const expenses = [
-  { id: 1, category: 'Rent', description: 'Monthly store rent', amount: 2500.00, date: '2024-01-01', paymentMethod: 'Bank Transfer', receipt: true },
-  { id: 2, category: 'Utilities', description: 'Electricity bill', amount: 185.50, date: '2024-01-15', paymentMethod: 'Cash', receipt: true },
-  { id: 3, category: 'Staff Salary', description: 'Monthly salaries', amount: 4200.00, date: '2024-01-01', paymentMethod: 'Bank Transfer', receipt: false },
-  { id: 4, category: 'Equipment', description: 'Coffee machine maintenance', amount: 150.00, date: '2024-01-14', paymentMethod: 'Card', receipt: true },
-  { id: 5, category: 'Marketing', description: 'Social media ads', amount: 250.00, date: '2024-01-10', paymentMethod: 'Card', receipt: false }
-];
+import type { BusinessExpense } from '../../types/supplierOrder';
 
 const categories = ['Rent', 'Utilities', 'Staff Salary', 'Equipment', 'Marketing', 'Supplies', 'Other'];
+const today = () => new Date().toISOString().slice(0, 10);
 
-export function ExpensesPage() {
+interface ExpensesPageProps {
+  expenses: BusinessExpense[];
+  onExpenseCreated: (expense: Omit<BusinessExpense, 'id'>) => void;
+}
+
+export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [expenseForm, setExpenseForm] = useState({
+    category: 'Supplies',
+    amount: '',
+    date: today(),
+    paymentMethod: 'Cash',
+    description: ''
+  });
 
   const filteredExpenses = expenses.filter(expense => {
     const matchesSearch = expense.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -45,6 +51,28 @@ export function ExpensesPage() {
     return <Badge className={colors[method as keyof typeof colors] || 'bg-gray-500/20 text-gray-500'}>{method}</Badge>;
   };
 
+  const handleCreateExpense = () => {
+    const amount = Number(expenseForm.amount);
+    if (!amount || amount <= 0 || !expenseForm.description.trim()) return;
+
+    onExpenseCreated({
+      category: expenseForm.category,
+      description: expenseForm.description.trim(),
+      amount,
+      date: expenseForm.date || today(),
+      paymentMethod: expenseForm.paymentMethod,
+      receipt: true
+    });
+    setExpenseForm({
+      category: 'Supplies',
+      amount: '',
+      date: today(),
+      paymentMethod: 'Cash',
+      description: ''
+    });
+    setIsAddDialogOpen(false);
+  };
+
   return (
     <div>
       {/* Header */}
@@ -65,7 +93,7 @@ export function ExpensesPage() {
               <DialogTitle className="text-gray-900">Add New Expense</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <Select>
+              <Select value={expenseForm.category} onValueChange={(category) => setExpenseForm({ ...expenseForm, category })}>
                 <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
                   <SelectValue placeholder="Select Category" />
                 </SelectTrigger>
@@ -75,21 +103,38 @@ export function ExpensesPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Input placeholder="Amount" type="number" step="0.01" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input type="date" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Select>
+              <Input
+                placeholder="Amount"
+                type="number"
+                step="0.01"
+                value={expenseForm.amount}
+                onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
+              <Input
+                type="date"
+                value={expenseForm.date}
+                onChange={(e) => setExpenseForm({ ...expenseForm, date: e.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
+              <Select value={expenseForm.paymentMethod} onValueChange={(paymentMethod) => setExpenseForm({ ...expenseForm, paymentMethod })}>
                 <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
                   <SelectValue placeholder="Payment Method" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-100 border-gray-200">
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Card">Card</SelectItem>
+                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                 </SelectContent>
               </Select>
-              <Textarea placeholder="Description" className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Textarea
+                placeholder="Description"
+                value={expenseForm.description}
+                onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => setIsAddDialogOpen(false)}>Add Expense</Button>
+                <Button className="flex-1" onClick={handleCreateExpense}>Add Expense</Button>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
               </div>
             </div>

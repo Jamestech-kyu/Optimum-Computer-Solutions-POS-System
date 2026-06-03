@@ -5,13 +5,14 @@ import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { Search, ShoppingCart, Plus, Minus, Trash2, Printer, CircleDollarSign, CreditCard } from 'lucide-react';
+import { Search, ShoppingCart, Plus, Minus, Trash2, CircleDollarSign, CreditCard, ScanBarcode } from 'lucide-react';
 import { CashDrawer } from '../CashDrawer';
 import { TransactionNotification } from '../TransactionNotification';
 import { MultiPaymentHandler } from '../MultiPaymentHandler';
 import { Receipt } from '../Receipt';
 import type { PaymentTransaction } from '../MultiPaymentHandler';
 import { formatCurrency } from '../utils/helpers';
+import { getStoredAppSettings } from '../../services/settings';
 
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
 
@@ -24,199 +25,32 @@ interface ProductSubItem {
   stockUnits: number;
 }
 
-export const initialProducts = [
-  {
-    id: '1',
-    name: 'Coffee Premium',
-    sku: 'BVRY-COFFE-001',
-    category: 'Beverages',
-    uom: 'cup',
-    prices: { retail: 250, wholesale: 210, corporate: 190, loyal: 225 },
-    stock: 25,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1447933601403-0c6688de566e?w=100&h=100&fit=crop'
-  },
-  {
-    id: '2',
-    name: 'Croissant',
-    sku: 'BKRY-CROSS-001',
-    category: 'Bakery',
-    uom: 'piece',
-    prices: { retail: 180, wholesale: 145, corporate: 130, loyal: 160 },
-    stock: 15,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1549903072-7e6e0bedb7fb?w=100&h=100&fit=crop'
-  },
-  {
-    id: '3',
-    name: 'Green Tea',
-    sku: 'BVRY-TEA-001',
-    category: 'Beverages',
-    uom: 'cup',
-    prices: { retail: 150, wholesale: 120, corporate: 110, loyal: 135 },
-    stock: 30,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?w=100&h=100&fit=crop'
-  },
-  {
-    id: '4',
-    name: 'Sandwich Club',
-    sku: 'FOOD-SAND-001',
-    category: 'Food',
-    uom: 'plate',
-    prices: { retail: 450, wholesale: 380, corporate: 350, loyal: 410 },
-    stock: 12,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1539252554453-80ab65ce3586?w=100&h=100&fit=crop'
-  },
-  {
-    id: '5',
-    name: 'Muffin Blueberry',
-    sku: 'BKRY-MUFF-001',
-    category: 'Bakery',
-    uom: 'piece',
-    prices: { retail: 160, wholesale: 130, corporate: 120, loyal: 145 },
-    stock: 20,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1507066274042-8a683d1e8a5c?w=100&h=100&fit=crop'
-  },
-  {
-    id: '6',
-    name: 'Latte',
-    sku: 'BVRY-LATT-001',
-    category: 'Beverages',
-    uom: 'cup',
-    prices: { retail: 280, wholesale: 235, corporate: 215, loyal: 255 },
-    stock: 18,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=100&h=100&fit=crop'
-  },
-  {
-    id: '7',
-    name: 'Orange Juice',
-    sku: 'BVRY-OJUI-001',
-    category: 'Beverages',
-    uom: 'glass',
-    prices: { retail: 220, wholesale: 180, corporate: 165, loyal: 200 },
-    stock: 22,
-    tax: 10,
-    image: 'https://unsplash.com/photos/orange-juice-in-clear-drinking-glass-kkrXVKK-jhg'
-  },
-  {
-    id: '8',
-    name: 'Caesar Salad',
-    sku: 'FOOD-SALAD-001',
-    category: 'Food',
-    uom: 'bowl',
-    prices: { retail: 420, wholesale: 350, corporate: 320, loyal: 385 },
-    stock: 14,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=100&h=100&fit=crop'
-  },
-  {
-    id: '9',
-    name: 'Pizza Slice',
-    sku: 'FOOD-PIZZA-001',
-    category: 'Food',
-    uom: 'slice',
-    prices: { retail: 250, wholesale: 210, corporate: 190, loyal: 225 },
-    stock: 30,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1604068549290-dea0e4a305ca?w=100&h=100&fit=crop'
-  },
-  {
-    id: '10',
-    name: 'Cookie Chocolate',
-    sku: 'BKRY-COOK-001',
-    category: 'Bakery',
-    uom: 'piece',
-    prices: { retail: 80, wholesale: 60, corporate: 55, loyal: 70 },
-    stock: 50,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=100&h=100&fit=crop'
-  },
-  {
-    id: '11',
-    name: 'Bottled Water',
-    sku: 'BVRY-WATER-001',
-    category: 'Beverages',
-    uom: 'bottle',
-    prices: { retail: 80, wholesale: 60, corporate: 55, loyal: 70 },
-    stock: 100,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1567319662202-3bac3c7f37ab?w=100&h=100&fit=crop'
-  },
-  {
-    id: '12',
-    name: 'Smoothie Berry',
-    sku: 'BVRY-SMOO-001',
-    category: 'Beverages',
-    uom: 'cup',
-    prices: { retail: 350, wholesale: 300, corporate: 280, loyal: 320 },
-    stock: 16,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1590080876614-bc8cc1b6ceb5?w=100&h=100&fit=crop'
-  },
-  {
-    id: '13',
-    name: 'Bagel Cream Cheese',
-    sku: 'BKRY-BAGEL-001',
-    category: 'Bakery',
-    uom: 'piece',
-    prices: { retail: 220, wholesale: 180, corporate: 165, loyal: 200 },
-    stock: 12,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1585411819144-e7a16f5f38ff?w=100&h=100&fit=crop'
-  },
-  {
-    id: '14',
-    name: 'Soft Drink Cola',
-    sku: 'BVRY-COLA-001',
-    category: 'Beverages',
-    uom: 'can',
-    prices: { retail: 100, wholesale: 80, corporate: 75, loyal: 90 },
-    stock: 45,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1554866585-d42c64eb5d69?w=100&h=100&fit=crop'
-  },
-  {
-    id: '15',
-    name: 'Pasta Carbonara',
-    sku: 'FOOD-PASTA-001',
-    category: 'Food',
-    uom: 'plate',
-    prices: { retail: 650, wholesale: 560, corporate: 520, loyal: 600 },
-    stock: 8,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1595295333707-9d2e6a1c9c1d?w=100&h=100&fit=crop'
-  },
-  {
-    id: '16',
-    name: 'Donut Glazed',
-    sku: 'BKRY-DONUT-001',
-    category: 'Bakery',
-    uom: 'piece',
-    prices: { retail: 120, wholesale: 95, corporate: 85, loyal: 105 },
-    stock: 35,
-    tax: 10,
-    image: 'https://images.unsplash.com/photo-1585080205849-e8e99bc83dba?w=100&h=100&fit=crop'
-  }
-];
+export interface POSProduct {
+  id: string;
+  name: string;
+  sku: string;
+  category: string;
+  uom: string;
+  prices: Record<PricingTier, number>;
+  stock: number;
+  tax: number;
+  image: string;
+}
 
-export type POSProduct = (typeof initialProducts)[number];
+export const initialProducts: POSProduct[] = [];
 
 const customers = [
-  { id: '1', name: 'Walk-in Customer', type: 'retail' },
-  { id: '2', name: 'John Doe', type: 'loyal' },
-  { id: '3', name: 'Jane Smith', type: 'retail' },
-  { id: '4', name: 'Wholesale Buyer', type: 'wholesale' },
-  { id: '5', name: 'Corporate Account', type: 'corporate' }
+  { id: '1', type: 'retail' },
+  { id: '2', type: 'wholesale' },
+  { id: '3', type: 'corporate' },
+  { id: '4', type: 'loyal' }
 ];
 
 interface CartItem {
   id: string;
   productId: string;
   name: string;
+  sku: string;
   uom: string;
   stockUnits: number;
   price: number;
@@ -242,6 +76,7 @@ export interface CompletedSale {
   method: string;
   timestamp: Date;
   items: CompletedSaleItem[];
+  cashier?: string;
 }
 
 export interface DayBalance {
@@ -270,6 +105,7 @@ export function POSPage({
 }: POSPageProps) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [scannerCode, setScannerCode] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState('1');
@@ -289,6 +125,8 @@ export function POSPage({
     tax: 0
   });
   const [cashTendered, setCashTendered] = useState('');
+  const appSettings = getStoredAppSettings();
+  const isScannerEnabled = appSettings.posSettings.scannerEnabled;
 
   const selectedCustomerData = customers.find(c => c.id === selectedCustomer);
   const customerType = (selectedCustomerData?.type || 'retail') as PricingTier;
@@ -351,6 +189,7 @@ export function POSPage({
         id: cartId,
         productId: product.id,
         name: `${product.name} - ${subItem.name}`,
+        sku: product.sku,
         uom: subItem.quantityLabel,
         stockUnits: subItem.stockUnits,
         price,
@@ -366,6 +205,26 @@ export function POSPage({
     setSearchTerm('');
     setIsProductDropdownOpen(false);
     setExpandedProductId(null);
+  };
+
+  const handleScannerSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const code = scannerCode.trim().toLowerCase();
+    if (!code) return;
+
+    const scannedProduct = products.find(product =>
+      product.sku.toLowerCase() === code ||
+      product.id.toLowerCase() === code ||
+      product.name.toLowerCase() === code
+    );
+
+    if (!scannedProduct) {
+      alert(`No product found for barcode/SKU: ${scannerCode}`);
+      return;
+    }
+
+    addToCart(scannedProduct);
+    setScannerCode('');
   };
 
   const updateQuantity = (id: string, quantity: number) => {
@@ -406,7 +265,7 @@ export function POSPage({
   const handleCompletePayment = (payments: PaymentTransaction[]) => {
     const transactionId = `TXN-${Date.now()}`;
     const paymentMethodLabel = payments.map(p => {
-      const methodName = p.method.replace('_', ' ');
+      const methodName = p.method === 'mpesa' ? 'M-Pesa' : p.method.replace('_', ' ');
       return `${methodName}: ${formatCurrency(p.amount)}`;
     }).join(', ');
     const cashAmount = payments
@@ -415,6 +274,7 @@ export function POSPage({
 
     const receiptItems = cart.map(item => ({
       name: item.name,
+      sku: item.sku,
       quantity: item.quantity,
       uom: item.uom,
       price: item.price,
@@ -449,7 +309,8 @@ export function POSPage({
       cashAmount,
       method: paymentMethodLabel,
       timestamp: new Date(),
-      items: saleItems
+      items: saleItems,
+      cashier: 'John Cashier'
     });
 
     setIsNotificationOpen(true);
@@ -481,6 +342,22 @@ export function POSPage({
       <div className="lg:col-span-2">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-4">Point of Sale</h1>
+          {isScannerEnabled && (
+            <form onSubmit={handleScannerSubmit} className="mb-3 flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
+              <div className="relative flex-1">
+                <ScanBarcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-600" />
+                <Input
+                  value={scannerCode}
+                  onChange={(event) => setScannerCode(event.target.value)}
+                  placeholder="Scan barcode or enter SKU"
+                  className="bg-white pl-10"
+                />
+              </div>
+              <Button type="submit" className="bg-blue-600 hover:bg-blue-700">
+                Add
+              </Button>
+            </form>
+          )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-4 h-4" />
             <Input
@@ -822,3 +699,4 @@ export function POSPage({
     </div>
   );
 }
+

@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@source "../../**/*.{js,ts,jsx,tsx}";
 
 /* Correctly import your local custom stylesheets */
 @import "./default_theme.css";

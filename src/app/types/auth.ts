@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'cashier' | 'accountant';
+export type UserRole = 'admin' | 'cashier' | 'accountant' | 'manager' | 'storekeeper' | 'customer';
 
 export interface User {
   id: string;
@@ -31,7 +31,7 @@ export interface DailyBalance {
 
 export type UnitOfMeasurement = 'pcs' | 'kg' | 'liter' | 'meter' | 'dozen' | 'box' | 'pack' | 'carton';
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
-export type PaymentMethod = 'cash' | 'card' | 'digital' | 'check' | 'bank_transfer';
+export type PaymentMethod = 'cash' | 'card' | 'mpesa' | 'check' | 'bank_transfer';
 
 export interface Product {
   id: string;

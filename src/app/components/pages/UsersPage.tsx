@@ -7,27 +7,46 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
 import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users } from 'lucide-react';
-import { users, roles, permissions } from '../data/constants';
+import type { BackendUser } from '../../services/api';
 import { getStatusBadge } from '../utils/helpers';
 
-export function UsersPage() {
+const roles = ['Admin', 'Manager', 'Cashier', 'Storekeeper', 'Customer'];
+const permissions = ['sales', 'inventory', 'customers', 'suppliers', 'reports', 'settings', 'users'];
+
+interface UsersPageProps {
+  users: BackendUser[];
+}
+
+const roleLabel = (role: string) => {
+  const labels: Record<string, string> = {
+    admin: 'Admin',
+    manager: 'Manager',
+    cashier: 'Cashier',
+    storekeeper: 'Storekeeper',
+    customer: 'Customer'
+  };
+  return labels[role] || role;
+};
+
+export function UsersPage({ users }: UsersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
   const filteredUsers = users.filter(user => {
-    const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
+    const matchesRole = roleFilter === 'all' || roleLabel(user.role) === roleFilter;
     return matchesSearch && matchesRole;
   });
 
   const getRoleBadge = (role: string) => {
     const colors = {
-      'Administrator': 'bg-green-500/20 text-green-600',
+      'Admin': 'bg-green-500/20 text-green-600',
       'Manager': 'bg-blue-500/20 text-blue-600',
       'Cashier': 'bg-green-500/20 text-green-600',
-      'Inventory Manager': 'bg-purple-500/20 text-purple-600'
+      'Storekeeper': 'bg-purple-500/20 text-purple-600',
+      'Customer': 'bg-gray-500/20 text-gray-500'
     };
     return <span className={`px-2 py-1 rounded text-xs ${colors[role as keyof typeof colors] || 'bg-gray-500/20 text-gray-500'}`}>{role}</span>;
   };
@@ -107,7 +126,7 @@ export function UsersPage() {
               <div>
                 <p className="text-gray-500 text-sm">Active Users</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.status === 'active').length}
+                  {users.filter(u => u.is_active).length}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -122,7 +141,7 @@ export function UsersPage() {
               <div>
                 <p className="text-gray-500 text-sm">Administrators</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.role === 'Administrator').length}
+                  {users.filter(u => u.role === 'admin').length}
                 </p>
               </div>
               <div className="p-2 bg-red-500/20 rounded-lg">
@@ -137,7 +156,7 @@ export function UsersPage() {
               <div>
                 <p className="text-gray-500 text-sm">Managers</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.role === 'Manager').length}
+                  {users.filter(u => u.role === 'manager').length}
                 </p>
               </div>
               <div className="p-2 bg-purple-500/20 rounded-lg">
@@ -196,11 +215,11 @@ export function UsersPage() {
             <TableBody>
               {filteredUsers.map(user => (
                 <TableRow key={user.id} className="border-gray-200">
-                  <TableCell className="text-gray-900 font-medium">{user.name}</TableCell>
+                  <TableCell className="text-gray-900 font-medium">{user.username}</TableCell>
                   <TableCell className="text-gray-600">{user.email}</TableCell>
-                  <TableCell>{getRoleBadge(user.role)}</TableCell>
-                  <TableCell className="text-gray-600">{user.lastLogin}</TableCell>
-                  <TableCell>{getStatusBadge(user.status)}</TableCell>
+                  <TableCell>{getRoleBadge(roleLabel(user.role))}</TableCell>
+                  <TableCell className="text-gray-600">{user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</TableCell>
+                  <TableCell>{getStatusBadge(user.is_active ? 'active' : 'inactive')}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
                       <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300">
