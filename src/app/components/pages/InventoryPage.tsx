@@ -21,6 +21,7 @@ interface InventoryPageProps {
   onAddItem: (product: Product) => Promise<void> | void;
   onBulkImportItems: (file: File) => Promise<ProductExcelImportResult>;
   onDownloadImportTemplate: () => Promise<void>;
+  onDownloadAvailableItems: () => Promise<void>;
 }
 
 const getReorderLevel = (product: POSProduct) => {
@@ -35,6 +36,24 @@ const getLocation = (category: string) => {
   return 'Storage A1';
 };
 
+const categoryUnitOptions = [
+  { category: 'Beverages', unit: 'liter' },
+  { category: 'Bakery', unit: 'pcs' },
+  { category: 'Dairy', unit: 'liter' },
+  { category: 'Food', unit: 'kg' },
+  { category: 'Supplies', unit: 'pack' },
+  { category: 'Household', unit: 'pcs' },
+  { category: 'Personal Care', unit: 'pcs' },
+  { category: 'Electronics', unit: 'pcs' }
+];
+
+const readImageAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ''));
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
+
 export function InventoryPage({
   products,
   stockMovements,
@@ -42,7 +61,8 @@ export function InventoryPage({
   onStockAdjustment,
   onAddItem,
   onBulkImportItems,
-  onDownloadImportTemplate
+  onDownloadImportTemplate,
+  onDownloadAvailableItems
 }: InventoryPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -59,6 +79,7 @@ export function InventoryPage({
   const [bulkImportErrors, setBulkImportErrors] = useState<ProductExcelImportResult['errors']>([]);
   const [isBulkImporting, setIsBulkImporting] = useState(false);
   const [isTemplateDownloading, setIsTemplateDownloading] = useState(false);
+  const [isExportDownloading, setIsExportDownloading] = useState(false);
   const [addItemForm, setAddItemForm] = useState({
     name: '',
     sku: '',
@@ -71,8 +92,10 @@ export function InventoryPage({
     loyalPrice: '',
     stock: '0',
     reorderLevel: '0',
-    tax: '10'
+    tax: '10',
+    image: ''
   });
+  const [imageError, setImageError] = useState('');
   const [formError, setFormError] = useState('');
 
   useEffect(() => {
@@ -80,6 +103,14 @@ export function InventoryPage({
       setIsAddItemOpen(true);
     }
   }, [openAddItemSignal]);
+
+  const itemCategoryOptions = [
+    ...categoryUnitOptions,
+    ...Array.from(new Map(products.map(product => [
+      product.category,
+      { category: product.category, unit: product.uom || 'pcs' }
+    ])).values())
+  ].filter((option, index, options) => options.findIndex(candidate => candidate.category === option.category) === index);
 
   const openAdjustmentDialog = (type: 'in' | 'out') => {
     setFormError('');
@@ -116,25 +147,30 @@ export function InventoryPage({
     const loyalPrice = Number(addItemForm.loyalPrice) || retailPrice;
     const buyingPrice = Number(addItemForm.buyingPrice) || 0;
 
-    await onAddItem({
-      id: Date.now().toString(),
-      name: addItemForm.name,
-      sku: addItemForm.sku,
-      category: addItemForm.category,
-      buyingPrice,
-      prices: {
-        retail: retailPrice,
-        wholesale: wholesalePrice,
-        corporate: corporatePrice,
-        loyal: loyalPrice
-      },
-      profitMargin: buyingPrice > 0 ? ((retailPrice - buyingPrice) / buyingPrice) * 100 : 0,
-      uom: addItemForm.uom,
-      stock: Number(addItemForm.stock) || 0,
-      reorderLevel: Number(addItemForm.reorderLevel) || 0,
-      image: '',
-      tax: Number(addItemForm.tax) || 0
-    });
+    try {
+      await onAddItem({
+        id: Date.now().toString(),
+        name: addItemForm.name,
+        sku: addItemForm.sku,
+        category: addItemForm.category,
+        buyingPrice,
+        prices: {
+          retail: retailPrice,
+          wholesale: wholesalePrice,
+          corporate: corporatePrice,
+          loyal: loyalPrice
+        },
+        profitMargin: buyingPrice > 0 ? ((retailPrice - buyingPrice) / buyingPrice) * 100 : 0,
+        uom: addItemForm.uom,
+        stock: Number(addItemForm.stock) || 0,
+        reorderLevel: Number(addItemForm.reorderLevel) || 0,
+        image: addItemForm.image,
+        tax: Number(addItemForm.tax) || 0
+      });
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Inventory item could not be added.');
+      return;
+    }
 
     setAddItemForm({
       name: '',
@@ -148,9 +184,36 @@ export function InventoryPage({
       loyalPrice: '',
       stock: '0',
       reorderLevel: '0',
-      tax: '10'
+      tax: '10',
+      image: ''
     });
+    setImageError('');
     setIsAddItemOpen(false);
+  };
+
+  const handleCategorySelected = (category: string) => {
+    const linkedUnit = itemCategoryOptions.find(option => option.category === category)?.unit || addItemForm.uom;
+    setAddItemForm(previousForm => ({ ...previousForm, category, uom: linkedUnit }));
+  };
+
+  const handleImageSelected = async (file?: File) => {
+    setImageError('');
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setImageError('Choose a valid image file.');
+      return;
+    }
+    if (file.size > 1.5 * 1024 * 1024) {
+      setImageError('Choose an image under 1.5 MB.');
+      return;
+    }
+
+    try {
+      const imageData = await readImageAsDataUrl(file);
+      setAddItemForm(previousForm => ({ ...previousForm, image: imageData }));
+    } catch {
+      setImageError('Image could not be loaded. Try another file.');
+    }
   };
 
   const handleDownloadTemplate = async () => {
@@ -163,6 +226,19 @@ export function InventoryPage({
       setFormError(error instanceof Error ? error.message : 'Product template could not be downloaded.');
     } finally {
       setIsTemplateDownloading(false);
+    }
+  };
+
+  const handleDownloadAvailableItems = async () => {
+    setFormError('');
+    setIsExportDownloading(true);
+
+    try {
+      await onDownloadAvailableItems();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Available items could not be downloaded.');
+    } finally {
+      setIsExportDownloading(false);
     }
   };
 
@@ -241,7 +317,11 @@ export function InventoryPage({
           </Button>
           <Button variant="outline" onClick={handleDownloadTemplate} disabled={isTemplateDownloading}>
             <Download className="w-4 h-4 mr-2" />
-            {isTemplateDownloading ? 'Downloading...' : 'Excel Template'}
+            {isTemplateDownloading ? 'Downloading...' : 'Blank Template'}
+          </Button>
+          <Button variant="outline" onClick={handleDownloadAvailableItems} disabled={isExportDownloading}>
+            <Download className="w-4 h-4 mr-2" />
+            {isExportDownloading ? 'Downloading...' : 'Available Items'}
           </Button>
           <Button variant="outline" onClick={() => {
             setFormError('');
@@ -319,8 +399,28 @@ export function InventoryPage({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input placeholder="Item name" value={addItemForm.name} onChange={(e) => setAddItemForm({ ...addItemForm, name: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
               <Input placeholder="SKU" value={addItemForm.sku} onChange={(e) => setAddItemForm({ ...addItemForm, sku: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input placeholder="Category" value={addItemForm.category} onChange={(e) => setAddItemForm({ ...addItemForm, category: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input placeholder="Unit of measure" value={addItemForm.uom} onChange={(e) => setAddItemForm({ ...addItemForm, uom: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Select value={addItemForm.category} onValueChange={handleCategorySelected}>
+                <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-100 border-gray-200">
+                  {itemCategoryOptions.map(option => (
+                    <SelectItem key={option.category} value={option.category}>
+                      {option.category} ({option.unit})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={addItemForm.uom} onValueChange={(uom) => setAddItemForm({ ...addItemForm, uom })}>
+                <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
+                  <SelectValue placeholder="Unit of measure" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-100 border-gray-200">
+                  {Array.from(new Set(itemCategoryOptions.map(option => option.unit))).map(unit => (
+                    <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Input type="number" placeholder="Buying price" value={addItemForm.buyingPrice} onChange={(e) => setAddItemForm({ ...addItemForm, buyingPrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
               <Input type="number" placeholder="Retail price" value={addItemForm.retailPrice} onChange={(e) => setAddItemForm({ ...addItemForm, retailPrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
               <Input type="number" placeholder="Wholesale price" value={addItemForm.wholesalePrice} onChange={(e) => setAddItemForm({ ...addItemForm, wholesalePrice: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
@@ -330,6 +430,33 @@ export function InventoryPage({
               <Input type="number" placeholder="Reorder level" value={addItemForm.reorderLevel} onChange={(e) => setAddItemForm({ ...addItemForm, reorderLevel: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
               <Input type="number" placeholder="Tax %" value={addItemForm.tax} onChange={(e) => setAddItemForm({ ...addItemForm, tax: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
             </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+              <Input
+                placeholder="Image URL"
+                value={addItemForm.image.startsWith('data:') ? '' : addItemForm.image}
+                onChange={(event) => setAddItemForm({ ...addItemForm, image: event.target.value })}
+                className="bg-gray-100 border-gray-200 text-gray-900"
+              />
+              <label className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                <Upload className="h-4 w-4" />
+                Upload
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => handleImageSelected(event.target.files?.[0])}
+                />
+              </label>
+            </div>
+            {addItemForm.image && (
+              <div className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 p-2">
+                <img src={addItemForm.image} alt={addItemForm.name || 'Item preview'} className="h-14 w-14 rounded object-cover" />
+                <Button type="button" variant="outline" size="sm" onClick={() => setAddItemForm({ ...addItemForm, image: '' })}>
+                  Remove image
+                </Button>
+              </div>
+            )}
+            {imageError && <p className="text-sm text-red-600">{imageError}</p>}
             {formError && <p className="text-sm text-red-600">{formError}</p>}
             <div className="flex gap-2">
               <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleAddItem}>

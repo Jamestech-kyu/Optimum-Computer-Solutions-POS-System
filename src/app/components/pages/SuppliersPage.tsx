@@ -10,6 +10,7 @@ import { Plus, Search, Edit, Eye, Phone, Mail, Building, PackagePlus } from 'luc
 import { formatCurrency } from '../utils/helpers';
 import { SupplierOrderInvoice, SupplierOrderStatus } from '../../types/supplierOrder';
 import type { POSProduct } from './POSPageEnhanced';
+import type { BackendSupplier } from '../../services/api';
 
 interface SupplierSummary {
   id: number;
@@ -17,6 +18,8 @@ interface SupplierSummary {
   contact: string;
   email: string;
   phone: string;
+  address: string;
+  notes: string;
   balance: number;
   lastPurchase: string;
   totalPurchases: number;
@@ -24,17 +27,28 @@ interface SupplierSummary {
 
 interface SuppliersPageProps {
   products: POSProduct[];
+  suppliers: BackendSupplier[];
   supplierInvoices: SupplierOrderInvoice[];
+  onSupplierCreated: (supplier: Omit<BackendSupplier, 'id'>) => Promise<void>;
   onSupplierOrderCreated: (invoice: Omit<SupplierOrderInvoice, 'id'>) => void;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreated }: SuppliersPageProps) {
+export function SuppliersPage({ products, suppliers: backendSuppliers, supplierInvoices, onSupplierCreated, onSupplierOrderCreated }: SuppliersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierSummary | null>(null);
   const [orderSupplier, setOrderSupplier] = useState<SupplierSummary | null>(null);
+  const [isSavingSupplier, setIsSavingSupplier] = useState(false);
+  const [supplierForm, setSupplierForm] = useState({
+    name: '',
+    contact_person: '',
+    email: '',
+    phone: '',
+    address: '',
+    notes: ''
+  });
   const [orderForm, setOrderForm] = useState({
     date: today(),
     amount: '',
@@ -45,8 +59,7 @@ export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreat
     status: 'pending' as SupplierOrderStatus
   });
 
-  const suppliers = Array.from(
-    supplierInvoices.reduce((map, invoice) => {
+  const invoiceSummaries = supplierInvoices.reduce((map, invoice) => {
       const existing = map.get(invoice.supplierId);
       const pendingBalance = invoice.status === 'pending' || invoice.status === 'overdue' ? invoice.amount : 0;
       map.set(invoice.supplierId, {
@@ -55,13 +68,36 @@ export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreat
         contact: invoice.contact || 'Not captured',
         email: existing?.email || '',
         phone: existing?.phone || 'Not captured',
+        address: existing?.address || '',
+        notes: existing?.notes || '',
         balance: (existing?.balance || 0) + pendingBalance,
         lastPurchase: existing && existing.lastPurchase > invoice.date ? existing.lastPurchase : invoice.date,
         totalPurchases: (existing?.totalPurchases || 0) + 1
       });
       return map;
-    }, new Map<number, SupplierSummary>()).values()
-  );
+    }, new Map<number, SupplierSummary>());
+
+  const suppliers = backendSuppliers.map((supplier) => {
+    const summary = invoiceSummaries.get(supplier.id);
+    return {
+      id: supplier.id,
+      name: supplier.name,
+      contact: supplier.contact_person || 'Not captured',
+      email: supplier.email || '',
+      phone: supplier.phone || 'Not captured',
+      address: supplier.address || supplier.address_line1 || '',
+      notes: supplier.notes || '',
+      balance: summary?.balance || 0,
+      lastPurchase: summary?.lastPurchase || 'No purchases yet',
+      totalPurchases: summary?.totalPurchases || 0
+    };
+  });
+
+  invoiceSummaries.forEach((summary, supplierId) => {
+    if (!backendSuppliers.some(supplier => supplier.id === supplierId)) {
+      suppliers.push(summary);
+    }
+  });
 
   const filteredSuppliers = suppliers.filter(supplier =>
     supplier.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -97,6 +133,36 @@ export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreat
       paymentMethod: 'Credit',
       status: 'pending'
     });
+  };
+
+  const resetSupplierForm = () => setSupplierForm({
+    name: '',
+    contact_person: '',
+    email: '',
+    phone: '',
+    address: '',
+    notes: ''
+  });
+
+  const handleCreateSupplier = async () => {
+    if (!supplierForm.name.trim() || !supplierForm.phone.trim()) return;
+
+    setIsSavingSupplier(true);
+    try {
+      await onSupplierCreated({
+        name: supplierForm.name.trim(),
+        contact_person: supplierForm.contact_person.trim(),
+        email: supplierForm.email.trim(),
+        phone: supplierForm.phone.trim(),
+        address: supplierForm.address.trim(),
+        notes: supplierForm.notes.trim(),
+        is_active: true
+      });
+      resetSupplierForm();
+      setIsAddDialogOpen(false);
+    } finally {
+      setIsSavingSupplier(false);
+    }
   };
 
   const handleCreateOrder = () => {
@@ -144,14 +210,16 @@ export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreat
               <DialogTitle className="text-gray-900">Add New Supplier</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <Input placeholder="Company Name" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input placeholder="Contact Person" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input placeholder="Email Address" type="email" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input placeholder="Phone Number" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Textarea placeholder="Company Address" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Textarea placeholder="Notes (Optional)" className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Company Name" value={supplierForm.name} onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Contact Person" value={supplierForm.contact_person} onChange={(e) => setSupplierForm({ ...supplierForm, contact_person: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Email Address" type="email" value={supplierForm.email} onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Phone Number" value={supplierForm.phone} onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Textarea placeholder="Company Address" value={supplierForm.address} onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Textarea placeholder="Notes (Optional)" value={supplierForm.notes} onChange={(e) => setSupplierForm({ ...supplierForm, notes: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => setIsAddDialogOpen(false)}>Add Supplier</Button>
+                <Button className="flex-1" onClick={handleCreateSupplier} disabled={isSavingSupplier || !supplierForm.name.trim() || !supplierForm.phone.trim()}>
+                  {isSavingSupplier ? 'Saving...' : 'Add Supplier'}
+                </Button>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
               </div>
             </div>
@@ -325,6 +393,12 @@ export function SuppliersPage({ products, supplierInvoices, onSupplierOrderCreat
                   <Phone className="w-4 h-4" />
                   {selectedSupplier.phone}
                 </div>
+                {selectedSupplier.address && (
+                  <div className="flex items-start gap-2 text-gray-600">
+                    <Building className="w-4 h-4 mt-0.5" />
+                    {selectedSupplier.address}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-200">

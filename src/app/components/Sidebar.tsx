@@ -16,6 +16,7 @@ import {
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { UserRole } from '../types/auth';
+import { useAppLanguage } from '../services/language';
 
 const allMenuItems = [
   { icon: Home, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'manager', 'cashier', 'storekeeper', 'accountant'] },
@@ -40,6 +41,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName }: SidebarProps) {
+  const { t } = useAppLanguage();
   const filteredMenuItems = allMenuItems.filter(item => 
     item.roles.includes(userRole)
   );
@@ -66,12 +68,12 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
       {/* Logo/Brand */}
       <div className="p-5 border-b border-gray-100">
         <h2 className="text-gray-900 font-semibold text-lg tracking-tight">SALES ENTRY & RECEIPT</h2>
-        <p className="text-gray-400 text-xs mt-0.5">Management System</p>
+        <p className="text-gray-400 text-xs mt-0.5">{t('Management System')}</p>
       </div>
 
       {/* User Info */}
       <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-        <p className="text-xs text-gray-500 mb-1">Logged in as</p>
+        <p className="text-xs text-gray-500 mb-1">{t('Logged in as')}</p>
         <p className="text-sm font-semibold text-gray-900">{userName}</p>
         <Badge className={`mt-2 ${getRoleBadgeColor(userRole)}`}>
           {userRole.charAt(0).toUpperCase() + userRole.slice(1)}
@@ -95,7 +97,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
               }`}
             >
               <IconComponent className="w-4 h-4 flex-shrink-0" />
-              <span>{item.label}</span>
+              <span>{t(item.label)}</span>
             </button>
           );
         })}
@@ -109,7 +111,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
           onClick={onLogout}
         >
           <LogOut className="w-4 h-4 mr-3" />
-          Logout
+          {t('Logout')}
         </Button>
       </div>
     </div>

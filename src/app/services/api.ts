@@ -11,6 +11,8 @@ export interface AppBackendState {
   completedSales: CompletedSale[];
   dayBalance: DayBalance;
   supplierInvoices: SupplierOrderInvoice[];
+  suppliers: BackendSupplier[];
+  customers: BackendCustomer[];
   users: BackendUser[];
 }
 
@@ -24,44 +26,60 @@ interface BackendProduct {
   name: string;
   category_name: string | null;
   base_unit_name?: string | null;
+  unit?: string | null;
   price: string | number;
+  retail_price?: string | number;
   wholesale_price: string | number | null;
   quantity: number;
+  stock_quantity?: string | number;
   image_url?: string;
   image_data?: string;
+  main_image?: string;
+  external_image_url?: string;
 }
 
 interface BackendSaleItem {
   product_id: number;
+  product?: number;
   name: string;
+  product_name?: string;
   price: string | number;
+  unit_price?: string | number;
   quantity: string | number;
   base_quantity?: string | number;
   line_total: string | number;
+  total?: string | number;
 }
 
 interface BackendSale {
   id: number;
   receipt_number: string;
+  sale_id?: string;
   customer_name: string;
   grand_total: string | number;
+  total?: string | number;
   amount_paid: string | number;
   payment_method: string;
   created_at: string;
+  sale_date?: string;
   items: BackendSaleItem[];
 }
 
 interface BackendSupplierInvoice {
   id: number;
   supplier_id?: number | null;
+  supplier?: number | null;
   supplier_name: string;
   contact: string;
   invoice_number: string;
+  po_number?: string;
   order_date: string;
   amount: string | number;
+  total?: string | number;
   status: SupplierOrderInvoice['status'];
-  items: number;
+  items: number | unknown[];
   payment_method: string;
+  payment_status?: string;
 }
 
 interface BackendAppSetting {
@@ -75,12 +93,16 @@ interface BackendAppSetting {
 
 export interface BackendNotification {
   id: number;
-  channel: string;
+  channel: string | number;
+  channel_name?: string;
   severity: 'info' | 'success' | 'warning' | 'error';
+  priority?: 'low' | 'medium' | 'high' | 'urgent';
+  status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   title: string;
   message: string;
-  action_url: string;
+  action_url?: string;
   is_read: boolean;
+  read_at?: string | null;
   created_at: string;
 }
 
@@ -95,44 +117,94 @@ export interface BackendUser {
   last_login?: string | null;
 }
 
+export interface BackendSupplier {
+  id: number;
+  name: string;
+  contact_person?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  address_line1?: string;
+  notes?: string;
+  is_active?: boolean;
+}
+
+export interface BackendCustomer {
+  id: number;
+  uuid?: string;
+  account_reference: string;
+  name: string;
+  phone: string;
+  email: string;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  county?: string;
+  postal_code?: string;
+  tax_number?: string | null;
+  loyalty_points: number;
+  total_spent: string | number;
+  pricing_tier: 'retail' | 'wholesale' | 'vip';
+  is_active: boolean;
+  is_blacklisted: boolean;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  last_purchase_date?: string | null;
+  discount_percentage?: number;
+  full_address?: string;
+}
+
 interface LoginResponse {
-  success: boolean;
+  success?: boolean;
   message?: string;
-  user?: {
-    username: string;
-    role: string;
-  };
+  error?: string;
+  user?: BackendUser;
   two_factor_required?: boolean;
   verification_code?: string;
   tokens?: Partial<{
     access: string;
     refresh: string;
   }>;
+  access?: string;
+  refresh?: string;
 }
 
 interface RegisterResponse {
-  success: boolean;
+  success?: boolean;
   message?: string;
-  user?: {
-    username: string;
-    role: string;
-  };
+  user?: BackendUser;
 }
 
 interface MpesaStkPushResponse {
   success: boolean;
   demo_mode?: boolean;
   message?: string;
+  error?: string;
   transaction?: {
     id?: number;
     checkout_request_id?: string;
     status?: string;
   };
+  transaction_id?: number;
+  checkout_request_id?: string;
+}
+
+export interface MpesaPaymentStatus {
+  id: number;
+  checkout_request_id: string;
+  status: 'pending' | 'completed' | 'paid' | 'success' | 'failed' | 'cancelled' | 'timeout';
+  amount: string | number;
+  mpesa_receipt_number?: string | null;
+  result_code?: number | null;
+  result_desc?: string;
+  query_error?: string;
+  completed_at?: string | null;
 }
 
 interface ProductMutationResponse {
-  success: boolean;
-  data: BackendProduct;
+  success?: boolean;
+  data?: BackendProduct;
 }
 
 export interface LoginResult {
@@ -142,20 +214,45 @@ export interface LoginResult {
   userRole?: string;
 }
 
-export type RegistrationRole = 'cashier' | 'storekeeper' | 'manager';
+export type RegistrationRole = 'admin' | 'accountant' | 'cashier' | 'storekeeper' | 'manager';
+export type BackendRole = 'super_admin' | 'admin' | 'manager' | 'accountant' | 'cashier' | 'inventory_clerk' | 'viewer' | 'storekeeper';
 
 export interface RegisterAccountInput {
   username: string;
   email: string;
   password: string;
-  role: RegistrationRole;
+  role: RegistrationRole | BackendRole;
 }
+
+export interface CreateSupplierInput {
+  name: string;
+  contact_person?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+}
+
+export type CreateCustomerInput = Pick<BackendCustomer,
+  'name' |
+  'phone' |
+  'email' |
+  'address_line1' |
+  'address_line2' |
+  'city' |
+  'county' |
+  'postal_code' |
+  'tax_number' |
+  'pricing_tier' |
+  'notes'
+>;
 
 export interface MpesaPaymentInput {
   phoneNumber: string;
   amount: number;
   customerName?: string;
   accountReference?: string;
+  transactionDesc?: string;
 }
 
 export interface ProductExcelImportResult {
@@ -181,58 +278,144 @@ export interface CreateProductInput {
   image_data?: string;
 }
 
-const getAccessToken = () => window.localStorage.getItem(ACCESS_TOKEN_KEY) || import.meta.env.VITE_API_TOKEN || '';
+export interface UpdateUserInput {
+  role?: BackendRole;
+  is_active?: boolean;
+}
+
+export const getAccessToken = () => window.localStorage.getItem(ACCESS_TOKEN_KEY) || import.meta.env.VITE_API_TOKEN || '';
+
+export const buildNotificationsWebSocketUrl = () => {
+  const token = getAccessToken();
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+  const apiUrl = new URL(baseUrl, window.location.origin);
+  const wsProtocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProtocol}//${apiUrl.host}/ws/notifications/${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+};
 
 const unwrapList = <T>(data: T[] | PaginatedResponse<T>): T[] => Array.isArray(data) ? data : data.results;
 
+const requestListOrEmpty = async <T>(path: string): Promise<T[]> => {
+  try {
+    const response = await request<T[] | PaginatedResponse<T>>(path);
+    return unwrapList(response);
+  } catch (error) {
+    console.warn(`Unable to load ${path}.`, error);
+    return [];
+  }
+};
+
 const toNumber = (value: string | number | null | undefined) => Number(value ?? 0);
+
+const hashText = (text: string) => Array.from(text).reduce((hash, character) => {
+  return ((hash << 5) - hash + character.charCodeAt(0)) >>> 0;
+}, 0);
+
+const productPhotoFor = (product: BackendProduct) => {
+  const hue = hashText(`${product.id}-${product.name}`) % 360;
+  const label = encodeURIComponent((product.name || 'POS').slice(0, 2).toUpperCase());
+  const svg = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">`,
+    `<rect width="160" height="160" rx="16" fill="hsl(${hue} 72% 92%)"/>`,
+    `<circle cx="118" cy="34" r="26" fill="hsl(${hue} 64% 82%)"/>`,
+    `<rect x="34" y="55" width="92" height="62" rx="10" fill="hsl(${hue} 58% 70%)"/>`,
+    `<path d="M52 55c4-20 52-20 56 0" fill="none" stroke="hsl(${hue} 54% 42%)" stroke-width="8" stroke-linecap="round"/>`,
+    `<text x="80" y="96" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="hsl(${hue} 56% 28%)">${label}</text>`,
+    `</svg>`
+  ].join('');
+
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+};
+
+const absoluteMediaUrl = (url?: string) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const apiUrl = new URL(import.meta.env.VITE_API_BASE_URL || '/api', window.location.origin);
+  return new URL(url, `${apiUrl.protocol}//${apiUrl.host}`).toString();
+};
 
 const mapProductFromApi = (product: BackendProduct): POSProduct => ({
   id: String(product.id),
   name: product.name,
   sku: product.sku,
   category: product.category_name || 'Uncategorized',
-  uom: product.base_unit_name || 'piece',
+  uom: product.base_unit_name || product.unit || 'piece',
   prices: {
-    retail: toNumber(product.price),
-    wholesale: toNumber(product.wholesale_price || product.price),
-    corporate: toNumber(product.wholesale_price || product.price),
-    loyal: toNumber(product.price)
+    retail: toNumber(product.retail_price ?? product.price),
+    wholesale: toNumber(product.wholesale_price || product.retail_price || product.price),
+    corporate: toNumber(product.wholesale_price || product.retail_price || product.price),
+    loyal: toNumber(product.retail_price ?? product.price)
   },
-  stock: toNumber(product.quantity),
+  stock: toNumber(product.stock_quantity ?? product.quantity),
   tax: 0,
-  image: product.image_data || product.image_url || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=100&h=100&fit=crop'
+  image: absoluteMediaUrl(product.image_data || product.image_url || product.external_image_url || product.main_image) || productPhotoFor(product)
 });
 
+const toBackendUnit = (unit?: string) => {
+  const unitMap: Record<string, string> = {
+    pcs: 'piece',
+    piece: 'piece',
+    kg: 'kg',
+    g: 'g',
+    liter: 'l',
+    litre: 'l',
+    l: 'l',
+    ml: 'ml',
+    box: 'box',
+    carton: 'carton',
+    pack: 'pack',
+    dozen: 'pack',
+    meter: 'piece'
+  };
+
+  return unitMap[(unit || '').toLowerCase()] || 'piece';
+};
+
 const mapSaleFromApi = (sale: BackendSale): CompletedSale => ({
-  id: sale.receipt_number || String(sale.id),
+  id: sale.receipt_number || sale.sale_id || String(sale.id),
   customer: sale.customer_name || 'Walk-in Customer',
-  amount: toNumber(sale.grand_total),
+  amount: toNumber(sale.grand_total ?? sale.total),
   cashAmount: sale.payment_method === 'cash' ? toNumber(sale.amount_paid) : 0,
   method: sale.payment_method,
-  timestamp: new Date(sale.created_at),
+  timestamp: new Date(sale.created_at || sale.sale_date || Date.now()),
   cashier: 'Cashier',
   items: (sale.items || []).map(item => ({
-    productId: String(item.product_id),
-    name: item.name,
+    productId: String(item.product_id ?? item.product),
+    name: item.name || item.product_name || 'Product',
     quantity: toNumber(item.quantity),
     stockUnits: toNumber(item.base_quantity || 1),
-    price: toNumber(item.price),
-    total: toNumber(item.line_total)
+    price: toNumber(item.price ?? item.unit_price),
+    total: toNumber(item.line_total ?? item.total)
   }))
 });
 
 const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrderInvoice => ({
-  id: invoice.invoice_number || `SUP-INV-${invoice.id.toString().padStart(3, '0')}`,
-  supplierId: invoice.supplier_id || invoice.id,
+  id: invoice.invoice_number || invoice.po_number || `SUP-INV-${invoice.id.toString().padStart(3, '0')}`,
+  supplierId: invoice.supplier_id || invoice.supplier || invoice.id,
   supplierName: invoice.supplier_name,
-  contact: invoice.contact,
+  contact: invoice.contact || '',
   date: invoice.order_date,
-  amount: toNumber(invoice.amount),
+  amount: toNumber(invoice.amount ?? invoice.total),
   status: invoice.status,
-  items: invoice.items,
-  paymentMethod: invoice.payment_method
+  items: Array.isArray(invoice.items) ? invoice.items.length : invoice.items,
+  paymentMethod: invoice.payment_method || invoice.payment_status || 'pending'
 });
+
+const mapNotificationFromApi = (notification: BackendNotification): BackendNotification => {
+  const severityByPriority: Record<string, BackendNotification['severity']> = {
+    low: 'info',
+    medium: 'info',
+    high: 'warning',
+    urgent: 'error'
+  };
+
+  return {
+    ...notification,
+    channel: notification.channel_name || String(notification.channel),
+    severity: notification.severity || severityByPriority[notification.priority || ''] || 'info',
+    is_read: notification.is_read ?? Boolean(notification.read_at || notification.status === 'read')
+  };
+};
 
 const request = async <T>(path: string, options?: RequestInit & { skipAuth?: boolean }): Promise<T> => {
   const token = getAccessToken();
@@ -257,8 +440,8 @@ const request = async <T>(path: string, options?: RequestInit & { skipAuth?: boo
     let message = text;
 
     try {
-      const data = JSON.parse(text) as { message?: string; detail?: string };
-      message = data.message || data.detail || text;
+      const data = JSON.parse(text) as { message?: string; detail?: string; error?: string };
+      message = data.message || data.detail || data.error || text;
     } catch {
       message = text;
     }
@@ -269,37 +452,50 @@ const request = async <T>(path: string, options?: RequestInit & { skipAuth?: boo
   return response.json() as Promise<T>;
 };
 
-const storeTokens = (tokens?: LoginResponse['tokens']) => {
-  if (!tokens?.access) {
+const storeTokens = (response: LoginResponse) => {
+  const access = response.tokens?.access || response.access;
+  const refresh = response.tokens?.refresh || response.refresh || '';
+
+  if (!access) {
     throw new Error('Login did not return an access token');
   }
 
-  window.localStorage.setItem(ACCESS_TOKEN_KEY, tokens.access);
-  window.localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh || '');
+  window.localStorage.setItem(ACCESS_TOKEN_KEY, access);
+  window.localStorage.setItem(REFRESH_TOKEN_KEY, refresh);
+};
+
+const normalizeAccountRole = (role?: RegistrationRole | BackendRole) => {
+  const roleMap: Record<string, string> = {
+    inventory_clerk: 'storekeeper',
+    viewer: 'cashier',
+    super_admin: 'admin',
+    accountant: 'manager'
+  };
+
+  return role ? roleMap[role] || role : role;
 };
 
 export const login = async (username: string, password: string): Promise<LoginResult> => {
-  const response = await request<LoginResponse>('/accounts/login/', {
+  const response = await request<LoginResponse>('/users/login/', {
     method: 'POST',
     body: JSON.stringify({ username, password }),
     skipAuth: true
   });
 
-  if (!response.success) {
-    throw new Error(response.message || 'Login failed');
+  if (response.success === false) {
+    throw new Error(response.message || response.error || 'Invalid credentials');
   }
 
-  if (response.two_factor_required) {
-    return {
-      success: true,
-      twoFactorRequired: true,
-      verificationCode: response.verification_code,
-      userRole: response.user?.role
-    };
+  if (!response.two_factor_required) {
+    storeTokens(response);
   }
 
-  storeTokens(response.tokens);
-  return { success: true, twoFactorRequired: false, userRole: response.user?.role };
+  return {
+    success: true,
+    twoFactorRequired: Boolean(response.two_factor_required),
+    verificationCode: response.verification_code,
+    userRole: response.user?.role
+  };
 };
 
 export const verifyTwoFactor = async (username: string, code: string): Promise<LoginResult> => {
@@ -313,46 +509,60 @@ export const verifyTwoFactor = async (username: string, code: string): Promise<L
     throw new Error(response.message || 'Two-factor verification failed');
   }
 
-  storeTokens(response.tokens);
+  storeTokens(response);
   return { success: true, twoFactorRequired: false, userRole: response.user?.role };
 };
 
 export const registerAccount = async (account: RegisterAccountInput) => {
-  const response = await request<RegisterResponse>('/accounts/register/', {
+  const generatedPhone = `07${String(hashText(`${account.username}-${account.email}`) % 100000000).padStart(8, '0')}`;
+  const response = await request<RegisterResponse | BackendUser>('/users/', {
     method: 'POST',
-    body: JSON.stringify(account),
+    body: JSON.stringify({
+      username: account.username,
+      email: account.email,
+      password: account.password,
+      confirm_password: account.password,
+      phone: generatedPhone,
+      role: normalizeAccountRole(account.role)
+    }),
     skipAuth: true
   });
 
-  if (!response.success) {
-    throw new Error(response.message || 'Account could not be created');
+  if ('success' in response && response.success === false) {
+    throw new Error(response.message || 'Account could not be created.');
   }
 
-  return response.user;
+  return 'user' in response && response.user ? response.user : response as BackendUser;
 };
 
 export const initiateMpesaPayment = async ({
   phoneNumber,
   amount,
   customerName = 'POS Customer',
-  accountReference = 'POS-SALE'
+  accountReference = 'POS-SALE',
+  transactionDesc = 'Payment for goods'
 }: MpesaPaymentInput) => {
-  const response = await request<MpesaStkPushResponse>('/mpesa-transactions/stk-push/', {
+  const response = await request<MpesaStkPushResponse>('/payments/mpesa-payments/stk-push/', {
     method: 'POST',
     body: JSON.stringify({
       phone_number: phoneNumber,
       amount,
       customer_name: customerName,
-      account_reference: accountReference
+      account_reference: accountReference,
+      transaction_desc: transactionDesc,
     })
   });
 
   if (!response.success) {
-    throw new Error(response.message || 'M-Pesa prompt could not be sent.');
+    throw new Error(response.message || response.error || 'M-Pesa prompt could not be sent.');
   }
 
   return response;
 };
+
+export const getMpesaPaymentStatus = (checkoutRequestId: string) => request<MpesaPaymentStatus>(
+  `/payments/mpesa-payments/status/?checkout_request_id=${encodeURIComponent(checkoutRequestId)}`
+);
 
 const requestFile = async (path: string, options?: RequestInit): Promise<Blob> => {
   const token = getAccessToken();
@@ -378,7 +588,9 @@ const requestFile = async (path: string, options?: RequestInit): Promise<Blob> =
   return response.blob();
 };
 
-export const downloadProductImportTemplate = () => requestFile('/excel/template/products/');
+export const downloadProductImportTemplate = () => requestFile('/products/download-template/');
+
+export const downloadAvailableProducts = () => requestFile('/products/export/');
 
 export const importProductsFromExcel = async (file: File): Promise<ProductExcelImportResult> => {
   const token = getAccessToken();
@@ -388,7 +600,7 @@ export const importProductsFromExcel = async (file: File): Promise<ProductExcelI
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}/excel/import/products/`, {
+    response = await fetch(`${API_BASE_URL}/products/bulk-import/`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {})
@@ -399,13 +611,19 @@ export const importProductsFromExcel = async (file: File): Promise<ProductExcelI
     throw new Error('Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
   }
 
-  const data = await response.json() as ProductExcelImportResult & { message?: string };
+  const data = await response.json() as Partial<ProductExcelImportResult> & { message?: string; error?: string; errors?: Array<string | { row: number; message: string }> };
 
-  if (!response.ok || !data.success) {
-    throw new Error(data.message || data.errors?.map(error => `Row ${error.row}: ${error.message}`).join('; ') || 'Products could not be imported.');
+  if (!response.ok) {
+    const errors = data.errors?.map(error => typeof error === 'string' ? error : `Row ${error.row}: ${error.message}`).join('; ');
+    throw new Error(data.message || data.error || errors || 'Products could not be imported.');
   }
 
-  return data;
+  return {
+    success: true,
+    created: data.created || 0,
+    updated: data.updated || 0,
+    errors: (data.errors || []).map((error, index) => typeof error === 'string' ? { row: index + 1, message: error } : error)
+  };
 };
 
 export const logout = () => {
@@ -416,21 +634,25 @@ export const logout = () => {
 export const hasStoredSession = () => Boolean(getAccessToken());
 
 export const loadBackendState = async (fallbackDayBalance: DayBalance): Promise<AppBackendState> => {
-  const [products, completedSales, supplierInvoices, users] = await Promise.all([
-    request<BackendProduct[] | PaginatedResponse<BackendProduct>>('/products/'),
-    request<BackendSale[] | PaginatedResponse<BackendSale>>('/sales/'),
-    request<BackendSupplierInvoice[] | PaginatedResponse<BackendSupplierInvoice>>('/supplier-orders/'),
-    request<BackendUser[] | PaginatedResponse<BackendUser>>('/accounts/users/')
+  const [products, completedSales, supplierOrders, suppliers, customers, users] = await Promise.all([
+    requestListOrEmpty<BackendProduct>('/products/'),
+    requestListOrEmpty<BackendSale>('/sales/'),
+    requestListOrEmpty<BackendSupplierInvoice>('/supplier-orders/'),
+    requestListOrEmpty<BackendSupplier>('/products/suppliers/'),
+    requestListOrEmpty<BackendCustomer>('/customers/'),
+    requestListOrEmpty<BackendUser>('/users/')
   ]);
 
-  const mappedProducts = unwrapList(products).map(mapProductFromApi);
+  const mappedProducts = products.map(mapProductFromApi);
 
   return {
     products: mappedProducts,
-    completedSales: unwrapList(completedSales).map(mapSaleFromApi),
+    completedSales: completedSales.map(mapSaleFromApi),
     dayBalance: fallbackDayBalance,
-    supplierInvoices: unwrapList(supplierInvoices).map(mapSupplierInvoiceFromApi),
-    users: unwrapList(users)
+    supplierInvoices: supplierOrders.map(mapSupplierInvoiceFromApi),
+    suppliers,
+    customers,
+    users
   };
 };
 
@@ -439,18 +661,11 @@ export const saveSale = async (sale: CompletedSale) => {
     method: 'POST',
     body: JSON.stringify({
       customer_name: sale.customer,
-      amount: sale.amount,
-      subtotal: sale.items.reduce((sum, item) => sum + item.total, 0),
       discount: 0,
-      tax: 0,
-      grand_total: sale.amount,
-      amount_paid: sale.cashAmount || sale.amount,
-      payment_method: sale.cashAmount > 0 && sale.cashAmount >= sale.amount ? 'cash' : 'mixed',
-      payment_reference: sale.id,
-      items: sale.items.map(item => ({
+      discount_percentage: 0,
+      cart_items: sale.items.map(item => ({
         product_id: Number(item.productId),
-        quantity: item.quantity,
-        price_type: 'retail'
+        quantity: item.quantity
       }))
     })
   });
@@ -458,65 +673,120 @@ export const saveSale = async (sale: CompletedSale) => {
   return mapSaleFromApi(createdSale);
 };
 
-export const updateProductStock = (productId: string, stock: number) => request<BackendProduct>(`/products/update/${productId}/`, {
-  method: 'PUT',
-  body: JSON.stringify({ quantity: stock })
+export const updateProductStock = async (productId: string, stock: number) => {
+  const response = await request<BackendProduct>(`/products/${productId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({ stock_quantity: stock })
+  });
+
+  return mapProductFromApi(response);
+};
+
+export const updateUser = (userId: number, user: UpdateUserInput) => request<BackendUser>(`/users/${userId}/`, {
+  method: 'PATCH',
+  body: JSON.stringify({
+    ...user,
+    role: normalizeAccountRole(user.role)
+  })
 });
 
-export const createProduct = async (product: CreateProductInput) => {
-  const response = await request<ProductMutationResponse>('/products/add/', {
-    method: 'POST',
-    body: JSON.stringify(product)
-  });
-
-  return mapProductFromApi(response.data);
-};
-
-export const saveDayBalance = async (dayBalance: DayBalance) => dayBalance;
-
-export const saveSupplierInvoice = async (invoice: SupplierOrderInvoice) => {
-  const createdInvoice = await request<BackendSupplierInvoice>('/supplier-orders/', {
-    method: 'POST',
-    body: JSON.stringify({
-      supplier_name: invoice.supplierName,
-      contact: invoice.contact,
-      order_date: invoice.date,
-      amount: invoice.amount,
-      status: invoice.status === 'delivered' ? 'paid' : invoice.status,
-      items: invoice.items,
-      payment_method: invoice.paymentMethod
-    })
-  });
-
-  return mapSupplierInvoiceFromApi(createdInvoice);
-};
-
-export const loadAppSettings = async () => {
-  const response = await request<BackendAppSetting>('/settings/');
-  return response.value;
-};
-
-export const saveBackendAppSettings = async (settings: AppSettings) => {
-  const response = await request<{ success: boolean; data: BackendAppSetting }>('/settings/', {
-    method: 'PUT',
-    body: JSON.stringify({ value: settings })
-  });
-
-  return response.data.value;
-};
-
-export const loadNotifications = async (unreadOnly = true) => {
-  const query = unreadOnly ? '?is_read=false&ordering=-created_at' : '?ordering=-created_at';
-  const response = await request<BackendNotification[] | PaginatedResponse<BackendNotification>>(`/payment-notifications/${query}`);
-  return unwrapList(response);
-};
-
-export const markNotificationRead = (notificationId: number) => request<{ success: boolean }>(`/payment-notifications/${notificationId}/mark-read/`, {
+export const deactivateUser = (userId: number) => request<{ message: string }>(`/users/${userId}/toggle-active/`, {
   method: 'POST',
   body: JSON.stringify({})
 });
 
-export const markAllNotificationsRead = () => request<{ success: boolean }>('/payment-notifications/mark-all-read/', {
+export const createProduct = async (product: CreateProductInput) => {
+  const response = await request<BackendProduct>('/products/', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: product.name,
+      barcode: product.sku,
+      description: '',
+      retail_price: product.price,
+      wholesale_price: product.wholesale_price,
+      cost_price: product.cost_price || 0,
+      stock_quantity: product.quantity || 0,
+      minimum_stock: product.minimum_stock || 0,
+      reorder_level: product.minimum_stock || 0,
+      category_name_input: product.category_name,
+      unit: toBackendUnit(product.base_unit_name),
+      tax_rate: 16,
+      is_active: true,
+      image_data: product.image_data || ''
+    })
+  });
+
+  return mapProductFromApi(response);
+};
+
+export const deactivateProduct = (productId: string) => request<BackendProduct>(`/products/${productId}/`, {
+  method: 'PATCH',
+  body: JSON.stringify({ is_active: false })
+});
+export const saveDayBalance = async (dayBalance: DayBalance) => dayBalance;
+
+export const createSupplier = async (supplier: CreateSupplierInput) => {
+  const response = await request<BackendSupplier>('/products/suppliers/', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: supplier.name,
+      contact_person: supplier.contact_person || '',
+      phone: supplier.phone || '',
+      email: supplier.email || '',
+      address: supplier.address || '',
+      notes: supplier.notes || '',
+      is_active: true
+    })
+  });
+
+  return response;
+};
+
+export const createCustomer = (customer: CreateCustomerInput) => request<BackendCustomer>('/customers/', {
+  method: 'POST',
+  body: JSON.stringify(customer)
+});
+
+export const saveSupplierInvoice = async (invoice: SupplierOrderInvoice) => {
+  const response = await request<BackendSupplierInvoice>('/supplier-orders/', {
+    method: 'POST',
+    body: JSON.stringify({
+      supplier_name: invoice.supplierName,
+      contact: invoice.contact,
+      invoice_number: String(invoice.id).startsWith('SUP-INV-') ? '' : String(invoice.id),
+      order_date: invoice.date,
+      amount: invoice.amount,
+      status: invoice.status,
+      items: invoice.items,
+      payment_method: invoice.paymentMethod || 'Credit'
+    })
+  });
+
+  return mapSupplierInvoiceFromApi(response);
+};
+
+export const loadAppSettings = async () => {
+  const saved = window.localStorage.getItem('pos-app-settings');
+  return saved ? JSON.parse(saved) as Partial<AppSettings> : {};
+};
+
+export const saveBackendAppSettings = async (settings: AppSettings) => {
+  window.localStorage.setItem('pos-app-settings', JSON.stringify(settings));
+  return settings;
+};
+
+export const loadNotifications = async (unreadOnly = true) => {
+  const query = unreadOnly ? '?status=pending&ordering=-created_at' : '?ordering=-created_at';
+  const response = await request<BackendNotification[] | PaginatedResponse<BackendNotification>>(`/notifications/notifications/${query}`);
+  return unwrapList(response).map(mapNotificationFromApi);
+};
+
+export const markNotificationRead = (notificationId: number) => request<{ success: boolean }>(`/notifications/notifications/${notificationId}/mark-read/`, {
+  method: 'POST',
+  body: JSON.stringify({})
+});
+
+export const markAllNotificationsRead = () => request<{ success: boolean }>('/notifications/notifications/mark-all-read/', {
   method: 'POST',
   body: JSON.stringify({})
 });

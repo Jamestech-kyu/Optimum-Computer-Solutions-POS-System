@@ -58,6 +58,29 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
 
   const salesTrend = useMemo(() => {
     const buckets = new Map<string, { name: string; revenue: number; transactions: number }>();
+    const days = rangeDays[dateRange];
+
+    if (dateRange === '7days' || dateRange === '30days') {
+      for (let offset = days - 1; offset >= 0; offset -= 1) {
+        const date = new Date();
+        date.setDate(date.getDate() - offset);
+        const key = shortDate(date);
+        buckets.set(key, {
+          name: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          revenue: 0,
+          transactions: 0
+        });
+      }
+    } else {
+      const monthCount = dateRange === '3months' ? 3 : dateRange === '6months' ? 6 : 12;
+      for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
+        const date = new Date();
+        date.setMonth(date.getMonth() - offset, 1);
+        const key = `${date.getFullYear()}-${date.getMonth()}`;
+        buckets.set(key, { name: monthKey(date), revenue: 0, transactions: 0 });
+      }
+    }
+
     filteredSales.forEach(sale => {
       const date = toDate(sale.timestamp);
       const key = dateRange === '7days' || dateRange === '30days' ? shortDate(date) : `${date.getFullYear()}-${date.getMonth()}`;

@@ -3,7 +3,8 @@ import { Bell, CheckCircle, Clock, PackageCheck, ReceiptText, TriangleAlert } fr
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { loadNotifications, markAllNotificationsRead, markNotificationRead, type BackendNotification } from '../services/api';
+import { buildNotificationsWebSocketUrl, loadNotifications, markAllNotificationsRead, markNotificationRead, type BackendNotification } from '../services/api';
+import { useAppLanguage } from '../services/language';
 
 const getNotificationIcon = (notification: BackendNotification) => {
   if (notification.severity === 'warning') return TriangleAlert;
@@ -30,6 +31,7 @@ const formatRelativeTime = (dateText: string) => {
 };
 
 export function TopHeader() {
+  const { t } = useAppLanguage();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [notifications, setNotifications] = useState<BackendNotification[]>([]);
   const [isLoadingNotifications, setIsLoadingNotifications] = useState(false);
@@ -58,9 +60,46 @@ export function TopHeader() {
 
   useEffect(() => {
     refreshNotifications();
-    const timer = window.setInterval(refreshNotifications, 8000);
 
-    return () => window.clearInterval(timer);
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
+    let closedByComponent = false;
+
+    const connectSocket = () => {
+      const wsUrl = buildNotificationsWebSocketUrl();
+
+      try {
+        socket = new WebSocket(wsUrl);
+        socket.addEventListener('message', () => {
+          refreshNotifications();
+        });
+        socket.addEventListener('close', () => {
+          if (!closedByComponent) {
+            reconnectTimer = window.setTimeout(connectSocket, 5000);
+          }
+        });
+        socket.addEventListener('error', () => {
+          socket?.close();
+        });
+      } catch (e) {
+        socket = null;
+      }
+    };
+
+    connectSocket();
+
+    const timer = window.setInterval(refreshNotifications, 15000);
+    window.addEventListener('pos:notifications-changed', refreshNotifications);
+
+    return () => {
+      window.clearInterval(timer);
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      window.removeEventListener('pos:notifications-changed', refreshNotifications);
+      closedByComponent = true;
+      if (socket) {
+        try { socket.close(); } catch {}
+      }
+    };
   }, []);
 
   const handleMarkRead = async (notificationId: number) => {
@@ -136,9 +175,9 @@ export function TopHeader() {
           <PopoverContent align="end" className="mr-2 w-[calc(100vw-1rem)] max-w-sm border-gray-200 bg-white p-0 sm:mr-0 sm:w-96">
             <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
               <div>
-                <h3 className="font-semibold text-gray-900">Notifications</h3>
+                <h3 className="font-semibold text-gray-900">{t('Notifications')}</h3>
                 <p className="text-xs text-gray-500">
-                  {isLoadingNotifications ? 'Refreshing...' : notificationCount > 0 ? `${notificationCount} unread updates` : 'No unread updates'}
+                  {isLoadingNotifications ? t('Refreshing...') : notificationCount > 0 ? `${notificationCount} unread updates` : t('No unread updates')}
                 </p>
               </div>
               {notificationCount > 0 && (
@@ -149,7 +188,7 @@ export function TopHeader() {
                   onClick={handleMarkAllRead}
                   className="h-8 px-2 text-xs font-medium text-blue-600 hover:text-blue-700"
                 >
-                  Mark all read
+                  {t('Mark all read')}
                 </Button>
               )}
             </div>
@@ -184,8 +223,8 @@ export function TopHeader() {
                   <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100">
                     <Bell className="w-5 h-5 text-gray-400" />
                   </div>
-                  <p className="text-sm font-medium text-gray-900">You're all caught up</p>
-                  <p className="mt-1 text-xs text-gray-500">New backend updates will appear here automatically.</p>
+                  <p className="text-sm font-medium text-gray-900">{t("You're all caught up")}</p>
+                  <p className="mt-1 text-xs text-gray-500">{t('New backend updates will appear here automatically.')}</p>
                 </div>
               )}
             </div>

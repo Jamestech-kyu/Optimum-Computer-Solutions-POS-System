@@ -7,6 +7,7 @@ import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Plus, Search, Edit, Trash2, TrendingUp, BarChart3 } from 'lucide-react';
+import { ImageWithFallback } from '../figma/ImageWithFallback';
 import type { POSProduct } from './POSPageEnhanced';
 
 export type UnitOfMeasurement = 'pcs' | 'kg' | 'liter' | 'meter' | 'dozen' | 'box' | 'pack' | 'carton';
@@ -194,8 +195,25 @@ export function ProductsPageEnhanced({
     setIsSubmitting(false);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Delete this product?')) {
+  const handleDelete = async (id: string) => {
+    if (!confirm('Delete this product?')) return;
+
+    if (liveProducts) {
+      try {
+        // call backend to deactivate product
+        await fetch(`${(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')}/products/delete/${id}/`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include'
+        });
+
+        // optimistically remove from UI
+        setLocalProducts(previous => previous.filter(p => p.id !== id));
+      } catch (error) {
+        console.error('Could not delete product', error);
+        alert('Product could not be deleted.');
+      }
+    } else {
       setLocalProducts(localProducts.filter(p => p.id !== id));
     }
   };
@@ -460,7 +478,7 @@ export function ProductsPageEnhanced({
                   <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-4 items-start">
                     <div className="h-28 w-28 rounded-md border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center">
                       {formData.image ? (
-                        <img
+                        <ImageWithFallback
                           src={formData.image}
                           alt={formData.name ? `${formData.name} preview` : 'Product preview'}
                           className="h-full w-full object-cover"
@@ -546,7 +564,7 @@ export function ProductsPageEnhanced({
                 {filteredProducts.map(product => (
                   <TableRow key={product.id}>
                     <TableCell>
-                      <img
+                      <ImageWithFallback
                         src={product.image}
                         alt={product.name}
                         className="h-12 w-12 rounded-md object-cover border border-gray-200 bg-gray-50"

@@ -5,16 +5,21 @@ import { PurchasesPage } from './PurchasesPage';
 import { SuppliersPage } from './SuppliersPage';
 import type { SupplierOrderInvoice } from '../../types/supplierOrder';
 import type { POSProduct } from './POSPageEnhanced';
+import type { BackendSupplier } from '../../services/api';
 
 interface ProcurementPageProps {
   products: POSProduct[];
+  suppliers: BackendSupplier[];
   supplierInvoices: SupplierOrderInvoice[];
+  onSupplierCreated: (supplier: Omit<BackendSupplier, 'id'>) => Promise<void>;
   onSupplierOrderCreated: (invoice: Omit<SupplierOrderInvoice, 'id'>) => void;
 }
 
 export function ProcurementPage({
   products,
+  suppliers,
   supplierInvoices,
+  onSupplierCreated,
   onSupplierOrderCreated
 }: ProcurementPageProps) {
   const [activeView, setActiveView] = useState<'suppliers' | 'purchases'>('suppliers');
@@ -49,7 +54,9 @@ export function ProcurementPage({
       {activeView === 'suppliers' ? (
         <SuppliersPage
           products={products}
+          suppliers={suppliers}
           supplierInvoices={supplierInvoices}
+          onSupplierCreated={onSupplierCreated}
           onSupplierOrderCreated={onSupplierOrderCreated}
         />
       ) : (

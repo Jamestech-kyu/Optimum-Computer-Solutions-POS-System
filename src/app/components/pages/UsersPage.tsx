@@ -7,48 +7,139 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
 import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users } from 'lucide-react';
-import type { BackendUser } from '../../services/api';
+import type { BackendRole, BackendUser, RegistrationRole } from '../../services/api';
 import { getStatusBadge } from '../utils/helpers';
 
-const roles = ['Admin', 'Manager', 'Cashier', 'Storekeeper', 'Customer'];
+const roles: Array<{ value: BackendRole; label: string }> = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'accountant', label: 'Accountant' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'cashier', label: 'Cashier' },
+  { value: 'inventory_clerk', label: 'Storekeeper' },
+  { value: 'viewer', label: 'Viewer' }
+];
 const permissions = ['sales', 'inventory', 'customers', 'suppliers', 'reports', 'settings', 'users'];
 
 interface UsersPageProps {
   users: BackendUser[];
+  onCreateUser: (user: { username: string; email: string; password: string; role: RegistrationRole | BackendRole }) => Promise<void>;
+  onUpdateUser: (userId: number, data: { role?: BackendRole; is_active?: boolean }) => Promise<void>;
+  onDeactivateUser: (userId: number) => Promise<void>;
 }
 
 const roleLabel = (role: string) => {
   const labels: Record<string, string> = {
     admin: 'Admin',
+    accountant: 'Accountant',
     manager: 'Manager',
     cashier: 'Cashier',
+    inventory_clerk: 'Storekeeper',
     storekeeper: 'Storekeeper',
+    viewer: 'Viewer',
+    super_admin: 'Super Admin',
     customer: 'Customer'
   };
   return labels[role] || role;
 };
 
-export function UsersPage({ users }: UsersPageProps) {
+export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser }: UsersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<BackendUser | null>(null);
+  const [formError, setFormError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [newUser, setNewUser] = useState({
+    username: '',
+    email: '',
+    password: '',
+    role: 'cashier' as RegistrationRole | BackendRole
+  });
+  const [editForm, setEditForm] = useState({
+    role: 'cashier' as BackendRole,
+    is_active: true
+  });
 
   const filteredUsers = users.filter(user => {
     const matchesSearch = user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === 'all' || roleLabel(user.role) === roleFilter;
+    const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
 
   const getRoleBadge = (role: string) => {
     const colors = {
       'Admin': 'bg-green-500/20 text-green-600',
+      'Super Admin': 'bg-red-500/20 text-red-600',
+      'Accountant': 'bg-yellow-500/20 text-yellow-700',
       'Manager': 'bg-blue-500/20 text-blue-600',
       'Cashier': 'bg-green-500/20 text-green-600',
       'Storekeeper': 'bg-purple-500/20 text-purple-600',
       'Customer': 'bg-gray-500/20 text-gray-500'
     };
     return <span className={`px-2 py-1 rounded text-xs ${colors[role as keyof typeof colors] || 'bg-gray-500/20 text-gray-500'}`}>{role}</span>;
+  };
+
+  const resetNewUser = () => {
+    setNewUser({ username: '', email: '', password: '', role: 'cashier' });
+    setFormError('');
+  };
+
+  const handleCreateUser = async () => {
+    setFormError('');
+    if (!newUser.username.trim() || !newUser.email.trim() || !newUser.password) {
+      setFormError('Enter username, email, and password.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await onCreateUser({
+        username: newUser.username.trim(),
+        email: newUser.email.trim(),
+        password: newUser.password,
+        role: newUser.role
+      });
+      resetNewUser();
+      setIsAddDialogOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'User could not be created.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openEditDialog = (user: BackendUser) => {
+    setEditingUser(user);
+    setEditForm({
+      role: user.role as BackendRole,
+      is_active: user.is_active
+    });
+    setFormError('');
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+
+    setIsSaving(true);
+    setFormError('');
+    try {
+      await onUpdateUser(editingUser.id, editForm);
+      setEditingUser(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'User could not be updated.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeactivateUser = async (user: BackendUser) => {
+    setFormError('');
+    try {
+      await onDeactivateUser(user.id);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'User could not be deactivated.');
+    }
   };
 
   return (
@@ -59,7 +150,10 @@ export function UsersPage({ users }: UsersPageProps) {
           <h1 className="text-3xl font-bold text-gray-900 mb-2">User Management</h1>
           <p className="text-gray-500">Manage staff accounts, roles, and permissions</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+          setIsAddDialogOpen(open);
+          if (!open) resetNewUser();
+        }}>
           <DialogTrigger asChild>
             <Button className="bg-blue-600 hover:bg-blue-700 text-white">
               <Plus className="w-4 h-4 mr-2" />
@@ -71,15 +165,16 @@ export function UsersPage({ users }: UsersPageProps) {
               <DialogTitle className="text-gray-900">Add New User</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <Input placeholder="Full Name" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Input placeholder="Email Address" type="email" className="bg-gray-100 border-gray-200 text-gray-900" />
-              <Select>
+              <Input placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Email Address" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} type="email" className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Input placeholder="Temporary password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} type="password" className="bg-gray-100 border-gray-200 text-gray-900" />
+              <Select value={newUser.role} onValueChange={(value) => setNewUser({ ...newUser, role: value as BackendRole })}>
                 <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
                   <SelectValue placeholder="Select Role" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-100 border-gray-200">
                   {roles.map(role => (
-                    <SelectItem key={role} value={role}>{role}</SelectItem>
+                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -96,14 +191,52 @@ export function UsersPage({ users }: UsersPageProps) {
                   ))}
                 </div>
               </div>
+              {formError && <p className="text-sm text-red-600">{formError}</p>}
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={() => setIsAddDialogOpen(false)}>Add User</Button>
+                <Button className="flex-1" onClick={handleCreateUser} disabled={isSaving}>
+                  {isSaving ? 'Adding...' : 'Add User'}
+                </Button>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
               </div>
             </div>
           </DialogContent>
         </Dialog>
       </div>
+
+      <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
+        <DialogContent className="bg-white border-gray-200 max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900">Edit User</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="font-medium text-gray-900">{editingUser?.username}</p>
+              <p className="text-sm text-gray-500">{editingUser?.email}</p>
+            </div>
+            <Select value={editForm.role} onValueChange={(value) => setEditForm({ ...editForm, role: value as BackendRole })}>
+              <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
+                <SelectValue placeholder="Select Role" />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-100 border-gray-200">
+                {roles.map(role => (
+                  <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center space-x-2">
+              <Checkbox id="edit-active" checked={editForm.is_active} onCheckedChange={(checked) => setEditForm({ ...editForm, is_active: checked === true })} />
+              <label htmlFor="edit-active" className="text-sm text-gray-600">Active account</label>
+            </div>
+            {formError && <p className="text-sm text-red-600">{formError}</p>}
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={handleUpdateUser} disabled={isSaving}>
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </Button>
+              <Button variant="outline" onClick={() => setEditingUser(null)}>Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -187,7 +320,7 @@ export function UsersPage({ users }: UsersPageProps) {
               <SelectContent className="bg-gray-100 border-gray-200">
                 <SelectItem value="all">All Roles</SelectItem>
                 {roles.map(role => (
-                  <SelectItem key={role} value={role}>{role}</SelectItem>
+                  <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -222,10 +355,10 @@ export function UsersPage({ users }: UsersPageProps) {
                   <TableCell>{getStatusBadge(user.is_active ? 'active' : 'inactive')}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300">
+                      <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300" onClick={() => openEditDialog(user)}>
                         <Edit className="w-4 h-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-300">
+                      <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-300" onClick={() => handleDeactivateUser(user)}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>

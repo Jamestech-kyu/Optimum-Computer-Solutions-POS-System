@@ -10,10 +10,12 @@ import { Separator } from '../ui/separator';
 import { Badge } from '../ui/badge';
 import { Barcode, Bell, Building, CreditCard, Database, FileText, Globe, Percent, QrCode, ScanBarcode, Settings, Shield } from 'lucide-react';
 import { TaxConfig } from '../TaxConfig';
-import { getStoredAppSettings, saveAppSettings } from '../../services/settings';
+import { getStoredAppSettings, saveAppSettings, type AppLanguage } from '../../services/settings';
 import { loadAppSettings, saveBackendAppSettings } from '../../services/api';
+import { useAppLanguage } from '../../services/language';
 
 export function SettingsPage() {
+  const { t } = useAppLanguage();
   const savedSettings = getStoredAppSettings();
   const [businessInfo, setBusinessInfo] = useState(savedSettings.businessInfo);
   const [invoiceSettings, setInvoiceSettings] = useState(savedSettings.invoiceSettings);
@@ -89,20 +91,20 @@ export function SettingsPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">System Settings</h1>
-        <p className="text-gray-500">Configure your POS system preferences and business information</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">{t('System Settings')}</h1>
+        <p className="text-gray-500">{t('Configure your POS system preferences and business information')}</p>
         {savedMessage && <p className="mt-2 text-sm font-medium text-green-600">{savedMessage}</p>}
       </div>
 
       <Tabs defaultValue="business" className="space-y-6">
         <TabsList className="bg-white border-gray-200">
-          <TabsTrigger value="business" className="data-[state=active]:bg-blue-600">Business Info</TabsTrigger>
-          <TabsTrigger value="invoice" className="data-[state=active]:bg-blue-600">Invoice Settings</TabsTrigger>
-          <TabsTrigger value="payment" className="data-[state=active]:bg-blue-600">Payment Methods</TabsTrigger>
-          <TabsTrigger value="pos" className="data-[state=active]:bg-blue-600">POS Config</TabsTrigger>
-          <TabsTrigger value="tax" className="data-[state=active]:bg-blue-600">Taxes</TabsTrigger>
-          <TabsTrigger value="system" className="data-[state=active]:bg-blue-600">System</TabsTrigger>
-          <TabsTrigger value="security" className="data-[state=active]:bg-blue-600">Security</TabsTrigger>
+          <TabsTrigger value="business" className="data-[state=active]:bg-blue-600">{t('Business Info')}</TabsTrigger>
+          <TabsTrigger value="invoice" className="data-[state=active]:bg-blue-600">{t('Invoice Settings')}</TabsTrigger>
+          <TabsTrigger value="payment" className="data-[state=active]:bg-blue-600">{t('Payment Methods')}</TabsTrigger>
+          <TabsTrigger value="pos" className="data-[state=active]:bg-blue-600">{t('POS Config')}</TabsTrigger>
+          <TabsTrigger value="tax" className="data-[state=active]:bg-blue-600">{t('Taxes')}</TabsTrigger>
+          <TabsTrigger value="system" className="data-[state=active]:bg-blue-600">{t('System')}</TabsTrigger>
+          <TabsTrigger value="security" className="data-[state=active]:bg-blue-600">{t('Security')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="business">
@@ -302,7 +304,7 @@ export function SettingsPage() {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-gray-600 text-sm mb-2">Currency</label>
+                  <label className="block text-gray-600 text-sm mb-2">{t('Currency')}</label>
                   <Select value={systemSettings.currency} onValueChange={(value) => setSystemSettings({ ...systemSettings, currency: value })}>
                     <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-gray-100 border-gray-200">
@@ -314,19 +316,18 @@ export function SettingsPage() {
                   </Select>
                 </div>
                 <div>
-                  <label className="block text-gray-600 text-sm mb-2">Language</label>
-                  <Select value={systemSettings.language} onValueChange={(value) => setSystemSettings({ ...systemSettings, language: value })}>
+                  <label className="block text-gray-600 text-sm mb-2">{t('Language')}</label>
+                  <Select value={systemSettings.language} onValueChange={(value) => setSystemSettings({ ...systemSettings, language: value as AppLanguage })}>
                     <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-gray-100 border-gray-200">
                       <SelectItem value="English">English</SelectItem>
-                      <SelectItem value="Spanish">Spanish</SelectItem>
-                      <SelectItem value="French">French</SelectItem>
+                      <SelectItem value="Kiswahili">Kiswahili</SelectItem>
                       <SelectItem value="German">German</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label className="block text-gray-600 text-sm mb-2">Timezone</label>
+                  <label className="block text-gray-600 text-sm mb-2">{t('Timezone')}</label>
                   <Select value={systemSettings.timezone} onValueChange={(value) => setSystemSettings({ ...systemSettings, timezone: value })}>
                     <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-gray-100 border-gray-200">
@@ -338,7 +339,7 @@ export function SettingsPage() {
                   </Select>
                 </div>
                 <div>
-                  <label className="block text-gray-600 text-sm mb-2">Date Format</label>
+                  <label className="block text-gray-600 text-sm mb-2">{t('Date Format')}</label>
                   <Select value={systemSettings.dateFormat} onValueChange={(value) => setSystemSettings({ ...systemSettings, dateFormat: value })}>
                     <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900"><SelectValue /></SelectTrigger>
                     <SelectContent className="bg-gray-100 border-gray-200">
@@ -391,7 +392,7 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <Button onClick={() => saveSettings('System settings saved.')} className="bg-blue-600 hover:bg-blue-700 text-white">Save System Settings</Button>
+              <Button onClick={() => saveSettings('System settings saved.')} className="bg-blue-600 hover:bg-blue-700 text-white">{t('Save System Settings')}</Button>
             </CardContent>
           </Card>
         </TabsContent>

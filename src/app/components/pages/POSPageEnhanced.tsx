@@ -10,9 +10,11 @@ import { CashDrawer } from '../CashDrawer';
 import { TransactionNotification } from '../TransactionNotification';
 import { MultiPaymentHandler } from '../MultiPaymentHandler';
 import { Receipt } from '../Receipt';
+import { ImageWithFallback } from '../figma/ImageWithFallback';
 import type { PaymentTransaction } from '../MultiPaymentHandler';
 import { formatCurrency } from '../utils/helpers';
 import { getStoredAppSettings } from '../../services/settings';
+import { useAppLanguage } from '../../services/language';
 
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
 
@@ -40,10 +42,10 @@ export interface POSProduct {
 export const initialProducts: POSProduct[] = [];
 
 const customers = [
-  { id: '1', type: 'retail' },
-  { id: '2', type: 'wholesale' },
-  { id: '3', type: 'corporate' },
-  { id: '4', type: 'loyal' }
+  { id: '1', name: 'Retail Customer', type: 'retail' },
+  { id: '2', name: 'Wholesale Customer', type: 'wholesale' },
+  { id: '3', name: 'Corporate Customer', type: 'corporate' },
+  { id: '4', name: 'Loyal Customer', type: 'loyal' }
 ];
 
 interface CartItem {
@@ -84,6 +86,7 @@ export interface DayBalance {
   openingBalance: number;
   closingBalance: number | null;
   status: 'open' | 'closed';
+  openedAt?: string | null;
 }
 
 interface POSPageProps {
@@ -103,6 +106,7 @@ export function POSPage({
   onCloseDay,
   cashSalesToday
 }: POSPageProps) {
+  const { t } = useAppLanguage();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [scannerCode, setScannerCode] = useState('');
@@ -341,7 +345,7 @@ export function POSPage({
       {/* Products Section */}
       <div className="lg:col-span-2">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">Point of Sale</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">{t('Point of Sale')}</h1>
           {isScannerEnabled && (
             <form onSubmit={handleScannerSubmit} className="mb-3 flex gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3">
               <div className="relative flex-1">
@@ -361,7 +365,7 @@ export function POSPage({
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500 w-4 h-4" />
             <Input
-              placeholder="Search and select a product..."
+              placeholder={t('Search and select a product...')}
               value={searchTerm}
               onFocus={() => setIsProductDropdownOpen(true)}
               onClick={() => setIsProductDropdownOpen(true)}
@@ -384,7 +388,7 @@ export function POSPage({
               <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg">
                 <div className="max-h-80 overflow-y-auto py-1">
                   {filteredProducts.length === 0 ? (
-                    <div className="px-4 py-3 text-sm text-gray-500">No products found</div>
+                    <div className="px-4 py-3 text-sm text-gray-500">{t('No products found')}</div>
                   ) : (
                     filteredProducts.map(product => {
                       const subItems = getProductSubItems(product);
@@ -397,7 +401,7 @@ export function POSPage({
                             onClick={() => setExpandedProductId(isExpanded ? null : product.id)}
                             className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
                           >
-                            <img
+                            <ImageWithFallback
                               src={product.image}
                               alt={product.name}
                               className="h-10 w-10 rounded object-cover"
@@ -453,7 +457,7 @@ export function POSPage({
                 onClick={() => addToCart(product)}
               >
                 <CardContent className="p-4">
-                  <img
+                  <ImageWithFallback
                     src={product.image}
                     alt={product.name}
                     className="w-full h-24 object-cover rounded-lg mb-3"
@@ -473,7 +477,7 @@ export function POSPage({
                       <span className="text-green-600 font-bold">{formatCurrency(price)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs text-gray-500">
-                      <span>Stock: {product.stock}</span>
+                      <span>{t('Stock')}: {product.stock}</span>
                       <Badge variant="outline" className="capitalize">{product.uom}</Badge>
                     </div>
                   </div>
@@ -490,13 +494,13 @@ export function POSPage({
           <CardHeader>
             <CardTitle className="text-gray-900 flex items-center gap-2">
               <ShoppingCart className="w-5 h-5" />
-              Cart {cart.length > 0 && `(${cart.length})`}
+              {t('Cart')} {cart.length > 0 && `(${cart.length})`}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Customer Selection */}
             <div>
-              <label className="text-sm font-medium text-gray-600 mb-2 block">Customer</label>
+              <label className="text-sm font-medium text-gray-600 mb-2 block">{t('Customer')}</label>
               <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
                 <SelectTrigger className="bg-gray-100 border-gray-200">
                   <SelectValue />
@@ -514,7 +518,7 @@ export function POSPage({
             {/* Cart Items */}
             <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
               {cart.length === 0 ? (
-                <p className="text-gray-500 text-center py-4 text-sm">No items in cart</p>
+                <p className="text-gray-500 text-center py-4 text-sm">{t('No items in cart')}</p>
               ) : (
                 cart.map(item => (
                   <div key={item.id} className="bg-gray-50 p-2 rounded flex justify-between items-center">
@@ -557,7 +561,7 @@ export function POSPage({
             {/* Discount */}
             {cart.length > 0 && (
               <div>
-                <label className="text-sm font-medium text-gray-600 mb-2 block">Discount (%)</label>
+                <label className="text-sm font-medium text-gray-600 mb-2 block">{t('Discount')} (%)</label>
                 <Input
                   type="number"
                   value={discount}
@@ -573,27 +577,27 @@ export function POSPage({
             {cart.length > 0 && (
               <div className="space-y-2 pt-4 border-t border-gray-200">
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Subtotal:</span>
+                  <span>{t('Subtotal')}:</span>
                   <span>{formatCurrency(subtotal)}</span>
                 </div>
                 {discount > 0 && (
                   <div className="flex justify-between text-sm text-orange-600">
-                    <span>Discount ({discount}%):</span>
+                    <span>{t('Discount')} ({discount}%):</span>
                     <span>-{formatCurrency(discountAmount)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm text-gray-600">
-                  <span>Tax:</span>
+                  <span>{t('Tax')}:</span>
                   <span>{formatCurrency(totalTax)}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold text-gray-900 bg-blue-50 p-2 rounded">
-                  <span>Total:</span>
+                  <span>{t('Total')}:</span>
                   <span>{formatCurrency(total)}</span>
                 </div>
 
                 {/* Cash Input */}
                 <div>
-                  <label className="text-sm font-medium text-gray-600 mb-2 block">Cash Tendered</label>
+                  <label className="text-sm font-medium text-gray-600 mb-2 block">{t('Cash Tendered')}</label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">KSh</span>
                     <Input
@@ -609,7 +613,7 @@ export function POSPage({
 
                 {change > 0 && (
                   <div className="bg-green-50 border border-green-200 p-2 rounded">
-                    <p className="text-xs text-green-700">Change Due</p>
+                    <p className="text-xs text-green-700">{t('Change Due')}</p>
                     <p className="text-lg font-bold text-green-600">{formatCurrency(change)}</p>
                   </div>
                 )}
@@ -622,7 +626,7 @@ export function POSPage({
                     onClick={handleCashPayment}
                   >
                     <CircleDollarSign className="w-4 h-4 mr-2" />
-                    Pay with Cash
+                    {t('Pay with Cash')}
                   </Button>
                   <Button
                     variant="outline"
@@ -631,7 +635,7 @@ export function POSPage({
                     onClick={() => setShowMultiPayment(true)}
                   >
                     <CreditCard className="w-4 h-4 mr-2" />
-                    Multi-Payment
+                    {t('Multi-Payment')}
                   </Button>
                 </div>
               </div>
@@ -667,10 +671,11 @@ export function POSPage({
         <Dialog open={showMultiPayment} onOpenChange={setShowMultiPayment}>
           <DialogContent className="bg-white border-gray-200 max-w-md">
             <DialogHeader>
-              <DialogTitle>Multi-Payment Checkout</DialogTitle>
+              <DialogTitle>{t('Multi-Payment Checkout')}</DialogTitle>
             </DialogHeader>
             <MultiPaymentHandler
               totalAmount={total}
+              customerName={selectedCustomerData?.name || 'Walk-in Customer'}
               onComplete={handleCompletePayment}
               onCancel={() => setShowMultiPayment(false)}
             />

@@ -27,9 +27,11 @@ export interface PosSettings {
   receiptQrEnabled: boolean;
 }
 
+export type AppLanguage = 'English' | 'Kiswahili';
+
 export interface SystemSettings {
   currency: string;
-  language: string;
+  language: AppLanguage;
   timezone: string;
   dateFormat: string;
   autoBackup: boolean;
@@ -56,6 +58,7 @@ export interface AppSettings {
 }
 
 export const APP_SETTINGS_STORAGE_KEY = 'pos-app-settings';
+export const APP_LANGUAGE_CHANGED_EVENT = 'pos:language-changed';
 
 export const defaultAppSettings: AppSettings = {
   businessInfo: {
@@ -125,4 +128,7 @@ export const getStoredAppSettings = (): AppSettings => {
 
 export const saveAppSettings = (settings: AppSettings) => {
   window.localStorage.setItem(APP_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  window.dispatchEvent(new CustomEvent(APP_LANGUAGE_CHANGED_EVENT, {
+    detail: settings.systemSettings.language
+  }));
 };

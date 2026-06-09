@@ -246,6 +246,8 @@ export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
                         onChange={(e) => setCreateRole(e.target.value as RegistrationRole)}
                         className="w-full h-10 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
                       >
+                        <option value="admin">Admin</option>
+                        <option value="accountant">Accountant</option>
                         <option value="cashier">Cashier</option>
                         <option value="storekeeper">Storekeeper</option>
                         <option value="manager">Manager</option>

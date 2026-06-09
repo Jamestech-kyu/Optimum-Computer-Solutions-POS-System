@@ -17,17 +17,25 @@ import { UserRole } from './types/auth';
 import type { QuickActionId } from './components/QuickActions';
 import type { Product } from './components/pages/ProductsPageEnhanced';
 import { BusinessExpense, StockMovement, SupplierOrderInvoice } from './types/supplierOrder';
-import { createProduct, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, saveDayBalance, saveSale, saveSupplierInvoice, updateProductStock, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
-import type { BackendUser, LoginResult } from './services/api';
+import { createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, saveDayBalance, saveSale, saveSupplierInvoice, updateProductStock, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
+import type { BackendCustomer, BackendRole, BackendSupplier, BackendUser, CreateCustomerInput, LoginResult, RegistrationRole } from './services/api';
 
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
+const refreshNotificationBell = () => window.dispatchEvent(new Event('pos:notifications-changed'));
+const DRAWER_AUTO_CLOSE_MS = 24 * 60 * 60 * 1000;
 
 const createInitialDayBalance = (): DayBalance => ({
   date: getTodayKey(),
   openingBalance: 0,
   closingBalance: null,
-  status: 'closed'
+  status: 'closed',
+  openedAt: null
 });
+
+const isDrawerExpired = (balance: DayBalance) => {
+  if (balance.status !== 'open' || !balance.openedAt) return false;
+  return Date.now() - new Date(balance.openedAt).getTime() >= DRAWER_AUTO_CLOSE_MS;
+};
 
 export default function App() {
   const [activeItem, setActiveItem] = useState('dashboard');
@@ -58,11 +66,15 @@ export default function App() {
   const [dayBalance, setDayBalance] = useState<DayBalance>(() => {
     const savedBalance = window.localStorage.getItem('pos-day-balance');
     const balance = savedBalance ? JSON.parse(savedBalance) as DayBalance : createInitialDayBalance();
-    return balance.date === getTodayKey() ? balance : createInitialDayBalance();
+    return balance.date === getTodayKey() && !isDrawerExpired(balance) ? balance : createInitialDayBalance();
   });
   const [supplierInvoices, setSupplierInvoices] = useState<SupplierOrderInvoice[]>(() => {
     const savedSupplierInvoices = window.localStorage.getItem('pos-supplier-invoices');
     return savedSupplierInvoices ? JSON.parse(savedSupplierInvoices) as SupplierOrderInvoice[] : [];
+  });
+  const [suppliers, setSuppliers] = useState<BackendSupplier[]>(() => {
+    const savedSuppliers = window.localStorage.getItem('pos-suppliers');
+    return savedSuppliers ? JSON.parse(savedSuppliers) as BackendSupplier[] : [];
   });
   const [expenses, setExpenses] = useState<BusinessExpense[]>(() => {
     const savedExpenses = window.localStorage.getItem('pos-expenses');
@@ -73,6 +85,7 @@ export default function App() {
     return savedStockMovements ? JSON.parse(savedStockMovements) as StockMovement[] : [];
   });
   const [users, setUsers] = useState<BackendUser[]>([]);
+  const [customers, setCustomers] = useState<BackendCustomer[]>([]);
 
   const cashSalesToday = completedSales
     .filter(sale => sale.timestamp.toISOString().slice(0, 10) === dayBalance.date)
@@ -93,6 +106,8 @@ export default function App() {
         setCompletedSales(backendState.completedSales);
         setDayBalance(backendState.dayBalance.date === getTodayKey() ? backendState.dayBalance : createInitialDayBalance());
         setSupplierInvoices(backendState.supplierInvoices);
+        setSuppliers(backendState.suppliers);
+        setCustomers(backendState.customers);
         setUsers(backendState.users);
         setIsBackendConnected(true);
       })
@@ -109,6 +124,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated || !isBackendConnected) {
+      return;
+    }
+
+    const refreshLiveState = () => {
+      loadBackendState(dayBalance)
+        .then((backendState) => {
+          setProducts(backendState.products);
+          setCompletedSales(backendState.completedSales);
+          setSupplierInvoices(backendState.supplierInvoices);
+          setSuppliers(backendState.suppliers);
+          setCustomers(backendState.customers);
+          setUsers(backendState.users);
+        })
+        .catch(error => console.warn('Unable to refresh live backend state.', error));
+    };
+
+    const timer = window.setInterval(refreshLiveState, 30000);
+    return () => window.clearInterval(timer);
+  }, [dayBalance, isAuthenticated, isBackendConnected]);
+
+  useEffect(() => {
     window.localStorage.setItem('pos-products', JSON.stringify(products));
   }, [products]);
 
@@ -121,8 +158,27 @@ export default function App() {
   }, [dayBalance]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      setDayBalance(previousBalance => {
+        if (!isDrawerExpired(previousBalance)) return previousBalance;
+        return {
+          ...previousBalance,
+          closingBalance: previousBalance.openingBalance + cashSalesToday,
+          status: 'closed'
+        };
+      });
+    }, 60 * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [cashSalesToday]);
+
+  useEffect(() => {
     window.localStorage.setItem('pos-supplier-invoices', JSON.stringify(supplierInvoices));
   }, [supplierInvoices]);
+
+  useEffect(() => {
+    window.localStorage.setItem('pos-suppliers', JSON.stringify(suppliers));
+  }, [suppliers]);
 
   useEffect(() => {
     window.localStorage.setItem('pos-expenses', JSON.stringify(expenses));
@@ -176,6 +232,8 @@ export default function App() {
       setProducts(backendState.products);
       setCompletedSales(backendState.completedSales);
       setSupplierInvoices(backendState.supplierInvoices);
+      setSuppliers(backendState.suppliers);
+      setCustomers(backendState.customers);
       setUsers(backendState.users);
       setIsBackendConnected(true);
     } catch (error) {
@@ -232,7 +290,9 @@ export default function App() {
     ]);
 
     if (isBackendConnected) {
-      saveSale(sale).catch(error => console.warn('Unable to save sale to backend.', error));
+      saveSale(sale)
+        .then(refreshNotificationBell)
+        .catch(error => console.warn('Unable to save sale to backend.', error));
     }
   };
 
@@ -269,6 +329,7 @@ export default function App() {
     });
 
     setProducts(previousProducts => [savedProduct, ...previousProducts]);
+    refreshNotificationBell();
   };
 
   const handleSupplierOrderCreated = (invoice: Omit<SupplierOrderInvoice, 'id'>) => {
@@ -317,7 +378,9 @@ export default function App() {
       ]);
 
       if (isBackendConnected) {
-        updateProductStock(newInvoice.productId, nextStock).catch(error => console.warn('Unable to update delivered stock in backend.', error));
+        updateProductStock(newInvoice.productId, nextStock)
+          .then(refreshNotificationBell)
+          .catch(error => console.warn('Unable to update delivered stock in backend.', error));
       }
     }
 
@@ -338,6 +401,55 @@ export default function App() {
         })
         .catch(error => console.warn('Unable to save supplier invoice to backend.', error));
     }
+  };
+
+  const handleSupplierCreated = async (supplier: Omit<BackendSupplier, 'id'>) => {
+    if (!isBackendConnected) {
+      setSuppliers(previousSuppliers => [
+        {
+          ...supplier,
+          id: Date.now(),
+          is_active: true
+        },
+        ...previousSuppliers
+      ]);
+      return;
+    }
+
+    const savedSupplier = await createSupplier({
+      name: supplier.name,
+      contact_person: supplier.contact_person,
+      phone: supplier.phone,
+      email: supplier.email,
+      address: supplier.address,
+      notes: supplier.notes
+    });
+
+    setSuppliers(previousSuppliers => [savedSupplier, ...previousSuppliers]);
+  };
+
+  const handleCustomerCreated = async (customer: CreateCustomerInput) => {
+    if (!isBackendConnected) {
+      setCustomers(previousCustomers => [
+        {
+          ...customer,
+          id: Date.now(),
+          account_reference: `LOCAL-${Date.now()}`,
+          loyalty_points: 0,
+          total_spent: 0,
+          pricing_tier: customer.pricing_tier || 'retail',
+          is_active: true,
+          is_blacklisted: false,
+          full_address: [customer.address_line1, customer.address_line2, customer.city, customer.county].filter(Boolean).join(', ')
+        },
+        ...previousCustomers
+      ]);
+      return;
+    }
+
+    const savedCustomer = await createCustomer(customer);
+    setCustomers(previousCustomers => [savedCustomer, ...previousCustomers]);
+    refreshNotificationBell();
   };
 
   const handleInventoryStockAdjustment = (productId: string, type: 'in' | 'out', quantity: number, reason: string) => {
@@ -371,7 +483,9 @@ export default function App() {
     ]);
 
     if (isBackendConnected) {
-      updateProductStock(productId, nextStock).catch(error => console.warn('Unable to update adjusted stock in backend.', error));
+      updateProductStock(productId, nextStock)
+        .then(refreshNotificationBell)
+        .catch(error => console.warn('Unable to update adjusted stock in backend.', error));
     }
   };
 
@@ -393,12 +507,43 @@ export default function App() {
     }
   };
 
+  const handleUserCreated = async (user: { username: string; email: string; password: string; role: RegistrationRole | BackendRole }) => {
+    await registerAccount(user);
+    const backendState = await loadBackendState(dayBalance);
+    setUsers(backendState.users);
+    refreshNotificationBell();
+  };
+
+  const handleUserUpdated = async (userId: number, data: { role?: BackendRole; is_active?: boolean }) => {
+    const updatedUser = await updateUser(userId, data);
+    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? updatedUser : user));
+    refreshNotificationBell();
+  };
+
+  const handleUserDeactivated = async (userId: number) => {
+    await deactivateUser(userId);
+    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? { ...user, is_active: false } : user));
+    refreshNotificationBell();
+  };
+
   const handleDownloadProductImportTemplate = async () => {
     const template = await downloadProductImportTemplate();
     const url = window.URL.createObjectURL(template);
     const link = document.createElement('a');
     link.href = url;
     link.download = 'product_import_template.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadAvailableProducts = async () => {
+    const exportFile = await downloadAvailableProducts();
+    const url = window.URL.createObjectURL(exportFile);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'available_products.xlsx';
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -416,6 +561,8 @@ export default function App() {
     setProducts(backendState.products);
     setCompletedSales(backendState.completedSales);
     setSupplierInvoices(backendState.supplierInvoices);
+    setSuppliers(backendState.suppliers);
+    setCustomers(backendState.customers);
     setUsers(backendState.users);
 
     return result;
@@ -436,7 +583,8 @@ export default function App() {
       date: getTodayKey(),
       openingBalance,
       closingBalance: null,
-      status: 'open'
+      status: 'open',
+      openedAt: new Date().toISOString()
     } as DayBalance;
 
     setDayBalance(nextDayBalance);
@@ -497,7 +645,14 @@ export default function App() {
           />
         );
       case 'customers':
-        return <CustomersPage completedSales={completedSales} openAddCustomerSignal={quickActionSignals.addCustomer} />;
+        return (
+          <CustomersPage
+            customers={customers}
+            completedSales={completedSales}
+            openAddCustomerSignal={quickActionSignals.addCustomer}
+            onCustomerCreated={handleCustomerCreated}
+          />
+        );
       case 'products':
         return (
           <ProductsPageEnhanced
@@ -511,7 +666,9 @@ export default function App() {
         return (
           <ProcurementPage
             products={products}
+            suppliers={suppliers}
             supplierInvoices={supplierInvoices}
+            onSupplierCreated={handleSupplierCreated}
             onSupplierOrderCreated={handleSupplierOrderCreated}
           />
         );
@@ -525,6 +682,7 @@ export default function App() {
             onAddItem={handleInventoryItemCreated}
             onBulkImportItems={handleBulkProductImport}
             onDownloadImportTemplate={handleDownloadProductImportTemplate}
+            onDownloadAvailableItems={handleDownloadAvailableProducts}
           />
         );
       case 'expenses':
@@ -540,7 +698,14 @@ export default function App() {
           />
         );
       case 'users':
-        return <UsersPage users={users} />;
+        return (
+          <UsersPage
+            users={users}
+            onCreateUser={handleUserCreated}
+            onUpdateUser={handleUserUpdated}
+            onDeactivateUser={handleUserDeactivated}
+          />
+        );
       case 'settings':
         return <SettingsPage />;
       default:
