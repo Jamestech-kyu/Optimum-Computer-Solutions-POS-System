@@ -66,6 +66,12 @@ const buildFallbackCustomersFromSales = (completedSales: CompletedSale[]): Backe
   return Array.from(summaries.values()).sort((a, b) => numberValue(b.total_spent) - numberValue(a.total_spent));
 };
 
+const saleMatchesCustomer = (sale: CompletedSale, customer: BackendCustomer) => {
+  if (sale.customerId && sale.customerId === customer.id) return true;
+  if (sale.customerAccountReference && sale.customerAccountReference === customer.account_reference) return true;
+  return sale.customer.toLowerCase() === customer.name.toLowerCase();
+};
+
 export function CustomersPage({ customers, completedSales, openAddCustomerSignal = 0, onCustomerCreated }: CustomersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -74,10 +80,33 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const displayCustomers = useMemo(
-    () => customers.length > 0 ? customers : buildFallbackCustomersFromSales(completedSales),
-    [customers, completedSales]
-  );
+  const displayCustomers = useMemo(() => {
+    if (customers.length === 0) return buildFallbackCustomersFromSales(completedSales);
+
+    const mergedCustomers = customers.map(customer => {
+      const customerSales = completedSales.filter(sale => saleMatchesCustomer(sale, customer));
+      if (customerSales.length === 0) return customer;
+
+      const saleTotal = customerSales.reduce((sum, sale) => sum + sale.amount, 0);
+      const latestSale = customerSales.reduce((latest, sale) =>
+        sale.timestamp > latest.timestamp ? sale : latest
+      );
+
+      return {
+        ...customer,
+        total_spent: numberValue(customer.total_spent) + saleTotal,
+        loyalty_points: customer.loyalty_points + Math.floor(saleTotal / 100),
+        last_purchase_date: latestSale.timestamp.toISOString()
+      };
+    });
+
+    const unmatchedSales = completedSales.filter(sale =>
+      !customers.some(customer => saleMatchesCustomer(sale, customer))
+    );
+
+    return [...mergedCustomers, ...buildFallbackCustomersFromSales(unmatchedSales)]
+      .sort((a, b) => numberValue(b.total_spent) - numberValue(a.total_spent));
+  }, [customers, completedSales]);
 
   useEffect(() => {
     if (openAddCustomerSignal > 0) {
@@ -97,6 +126,9 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
 
   const totalSpent = displayCustomers.reduce((sum, customer) => sum + numberValue(customer.total_spent), 0);
   const totalLoyaltyPoints = displayCustomers.reduce((sum, customer) => sum + customer.loyalty_points, 0);
+  const getCustomerSales = (customer: BackendCustomer) =>
+    completedSales.filter(sale => saleMatchesCustomer(sale, customer))
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   const getPricingTier = (tier: BackendCustomer['pricing_tier']) => {
     if (tier === 'vip') return <Badge className="bg-yellow-500/20 text-yellow-700">VIP</Badge>;
@@ -311,6 +343,38 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
                 <div><p className="text-gray-500">Discount</p><p className="text-gray-900 font-semibold">{selectedCustomer.discount_percentage ?? 0}%</p></div>
                 <div><p className="text-gray-500">Last Purchase</p><p className="text-gray-900 font-semibold">{formatDate(selectedCustomer.last_purchase_date)}</p></div>
                 <div className="md:col-span-2"><p className="text-gray-500">Notes</p><p className="text-gray-900">{selectedCustomer.notes || 'No notes captured'}</p></div>
+              </div>
+              <div className="border-t border-gray-200 pt-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h4 className="font-semibold text-gray-900">Transaction History</h4>
+                  <Badge className="bg-blue-500/20 text-blue-700">
+                    {getCustomerSales(selectedCustomer).length} transaction{getCustomerSales(selectedCustomer).length === 1 ? '' : 's'}
+                  </Badge>
+                </div>
+                {getCustomerSales(selectedCustomer).length === 0 ? (
+                  <p className="text-sm text-gray-500">No transactions recorded for this customer yet.</p>
+                ) : (
+                  <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                    {getCustomerSales(selectedCustomer).map(sale => (
+                      <div key={sale.id} className="rounded-md border border-gray-200 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-medium text-blue-600">{sale.id}</p>
+                            <p className="text-xs text-gray-500">{sale.timestamp.toLocaleString()}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-semibold text-green-700">KSh {sale.amount.toFixed(2)}</p>
+                            <p className="text-xs text-gray-500">{sale.items.length} item{sale.items.length === 1 ? '' : 's'}</p>
+                          </div>
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600">
+                          {sale.items.slice(0, 3).map(item => item.name).join(', ')}
+                          {sale.items.length > 3 ? ` +${sale.items.length - 3} more` : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <Button className="w-full" onClick={() => setSelectedCustomer(null)}>Close</Button>
             </div>

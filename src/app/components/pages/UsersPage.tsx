@@ -6,16 +6,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
-import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users, CheckCircle2, XCircle } from 'lucide-react';
 import type { BackendRole, BackendUser, RegistrationRole } from '../../services/api';
 import { getStatusBadge } from '../utils/helpers';
 
 const roles: Array<{ value: BackendRole; label: string }> = [
-  { value: 'admin', label: 'Admin' },
   { value: 'accountant', label: 'Accountant' },
   { value: 'manager', label: 'Manager' },
   { value: 'cashier', label: 'Cashier' },
-  { value: 'inventory_clerk', label: 'Storekeeper' },
+  { value: 'inventory_clerk', label: 'Inventory Clerk' },
   { value: 'viewer', label: 'Viewer' }
 ];
 const permissions = ['sales', 'inventory', 'customers', 'suppliers', 'reports', 'settings', 'users'];
@@ -25,6 +24,8 @@ interface UsersPageProps {
   onCreateUser: (user: { username: string; email: string; password: string; role: RegistrationRole | BackendRole }) => Promise<void>;
   onUpdateUser: (userId: number, data: { role?: BackendRole; is_active?: boolean }) => Promise<void>;
   onDeactivateUser: (userId: number) => Promise<void>;
+  onApproveUser: (userId: number) => Promise<void>;
+  onRejectUser: (userId: number) => Promise<void>;
 }
 
 const roleLabel = (role: string) => {
@@ -33,8 +34,8 @@ const roleLabel = (role: string) => {
     accountant: 'Accountant',
     manager: 'Manager',
     cashier: 'Cashier',
-    inventory_clerk: 'Storekeeper',
-    storekeeper: 'Storekeeper',
+    inventory_clerk: 'Inventory Clerk',
+    storekeeper: 'Inventory Clerk',
     viewer: 'Viewer',
     super_admin: 'Super Admin',
     customer: 'Customer'
@@ -42,7 +43,7 @@ const roleLabel = (role: string) => {
   return labels[role] || role;
 };
 
-export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser }: UsersPageProps) {
+export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser, onApproveUser, onRejectUser }: UsersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -67,6 +68,8 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser 
     return matchesSearch && matchesRole;
   });
 
+  const pendingUsers = users.filter(user => user.approval_status === 'pending');
+
   const getRoleBadge = (role: string) => {
     const colors = {
       'Admin': 'bg-green-500/20 text-green-600',
@@ -74,7 +77,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser 
       'Accountant': 'bg-yellow-500/20 text-yellow-700',
       'Manager': 'bg-blue-500/20 text-blue-600',
       'Cashier': 'bg-green-500/20 text-green-600',
-      'Storekeeper': 'bg-purple-500/20 text-purple-600',
+      'Inventory Clerk': 'bg-purple-500/20 text-purple-600',
       'Customer': 'bg-gray-500/20 text-gray-500'
     };
     return <span className={`px-2 py-1 rounded text-xs ${colors[role as keyof typeof colors] || 'bg-gray-500/20 text-gray-500'}`}>{role}</span>;
@@ -140,6 +143,36 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser 
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'User could not be deactivated.');
     }
+  };
+
+  const handleApproveUser = async (user: BackendUser) => {
+    setFormError('');
+    try {
+      await onApproveUser(user.id);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'User could not be approved.');
+    }
+  };
+
+  const handleRejectUser = async (user: BackendUser) => {
+    setFormError('');
+    try {
+      await onRejectUser(user.id);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'User could not be rejected.');
+    }
+  };
+
+  const getApprovalBadge = (user: BackendUser) => {
+    const status = user.approval_status || (user.is_active ? 'approved' : 'pending');
+    const colors: Record<string, string> = {
+      approved: 'bg-green-500/20 text-green-700',
+      pending: 'bg-yellow-500/20 text-yellow-700',
+      rejected: 'bg-red-500/20 text-red-700',
+      expired: 'bg-gray-500/20 text-gray-600'
+    };
+
+    return <span className={`px-2 py-1 rounded text-xs capitalize ${colors[status] || colors.pending}`}>{status}</span>;
   };
 
   return (
@@ -287,13 +320,13 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser 
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Managers</p>
+                <p className="text-gray-500 text-sm">Pending Approval</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.role === 'manager').length}
+                  {pendingUsers.length}
                 </p>
               </div>
-              <div className="p-2 bg-purple-500/20 rounded-lg">
-                <Search className="w-6 h-6 text-purple-600" />
+              <div className="p-2 bg-yellow-500/20 rounded-lg">
+                <Search className="w-6 h-6 text-yellow-600" />
               </div>
             </div>
           </CardContent>
@@ -341,6 +374,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser 
                 <TableHead className="text-gray-600">Email</TableHead>
                 <TableHead className="text-gray-600">Role</TableHead>
                 <TableHead className="text-gray-600">Last Login</TableHead>
+                <TableHead className="text-gray-600">Approval</TableHead>
                 <TableHead className="text-gray-600">Status</TableHead>
                 <TableHead className="text-gray-600">Actions</TableHead>
               </TableRow>
@@ -352,9 +386,27 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser 
                   <TableCell className="text-gray-600">{user.email}</TableCell>
                   <TableCell>{getRoleBadge(roleLabel(user.role))}</TableCell>
                   <TableCell className="text-gray-600">{user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      {getApprovalBadge(user)}
+                      {user.approval_status === 'pending' && user.approval_deadline_at && (
+                        <p className="text-xs text-gray-500">By {new Date(user.approval_deadline_at).toLocaleString()}</p>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>{getStatusBadge(user.is_active ? 'active' : 'inactive')}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
+                      {user.approval_status === 'pending' && (
+                        <>
+                          <Button size="sm" variant="ghost" className="text-green-600 hover:text-green-300" onClick={() => handleApproveUser(user)}>
+                            <CheckCircle2 className="w-4 h-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-300" onClick={() => handleRejectUser(user)}>
+                            <XCircle className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
                       <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300" onClick={() => openEditDialog(user)}>
                         <Edit className="w-4 h-4" />
                       </Button>

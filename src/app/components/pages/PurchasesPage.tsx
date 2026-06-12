@@ -22,8 +22,14 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
     supplier: invoice.supplierName,
     date: invoice.date,
     amount: invoice.amount,
-    status: invoice.status === 'paid' ? 'completed' : invoice.status === 'delivered' ? 'delivered' : invoice.status === 'overdue' ? 'pending' : invoice.status,
-    items: invoice.items
+    status: invoice.status,
+    items: invoice.items,
+    deliveryNote: invoice.deliveryNote,
+    goodsReceivingNote: invoice.goodsReceivingNote,
+    requestedItems: invoice.orderItems?.reduce((sum, item) => sum + item.requestedQuantity, 0) || invoice.quantityRequested || 0,
+    deliveredItems: invoice.orderItems?.reduce((sum, item) => sum + item.deliveredQuantity, 0) || invoice.quantityDelivered || 0,
+    pendingItems: invoice.orderItems?.reduce((sum, item) => sum + item.pendingQuantity, 0) || invoice.quantityPending || 0,
+    orderItems: invoice.orderItems || []
   }));
   const pagePurchases = livePurchases;
   const pageSuppliers = Array.from(new Map(supplierInvoices.map(invoice => [invoice.supplierId, { id: invoice.supplierId, name: invoice.supplierName }])).values());
@@ -37,8 +43,8 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'completed':
-        return <Badge className="bg-green-500/20 text-green-600">Completed</Badge>;
+      case 'requested':
+        return <Badge className="bg-blue-500/20 text-blue-600">Requested</Badge>;
       case 'pending':
         return <Badge className="bg-orange-500/20 text-orange-600">Pending</Badge>;
       case 'delivered':
@@ -171,7 +177,7 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
               <div>
                 <p className="text-gray-500 text-sm">Pending Orders</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {pagePurchases.filter(p => p.status === 'pending').length}
+                  {pagePurchases.reduce((sum, purchase) => sum + purchase.pendingItems, 0)}
                 </p>
               </div>
               <div className="p-2 bg-orange-500/20 rounded-lg">
@@ -214,7 +220,7 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
               </SelectTrigger>
               <SelectContent className="bg-gray-100 border-gray-200">
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="requested">Requested</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="delivered">Delivered</SelectItem>
                 <SelectItem value="draft">Draft</SelectItem>
@@ -237,7 +243,11 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
                 <TableHead className="text-gray-600">Supplier</TableHead>
                 <TableHead className="text-gray-600">Date</TableHead>
                 <TableHead className="text-gray-600">Amount</TableHead>
-                <TableHead className="text-gray-600">Items</TableHead>
+                <TableHead className="text-gray-600">Requested</TableHead>
+                <TableHead className="text-gray-600">Delivered</TableHead>
+                <TableHead className="text-gray-600">Pending</TableHead>
+                <TableHead className="text-gray-600">GRN</TableHead>
+                <TableHead className="text-gray-600">Delivery Note</TableHead>
                 <TableHead className="text-gray-600">Status</TableHead>
                 <TableHead className="text-gray-600">Actions</TableHead>
               </TableRow>
@@ -249,7 +259,11 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
                   <TableCell className="text-gray-900">{purchase.supplier}</TableCell>
                   <TableCell className="text-gray-600">{purchase.date}</TableCell>
                   <TableCell className="text-green-600">KSh {purchase.amount.toFixed(2)}</TableCell>
-                  <TableCell className="text-gray-600">{purchase.items} items</TableCell>
+                  <TableCell className="text-gray-600">{purchase.requestedItems}</TableCell>
+                  <TableCell className="text-green-600">{purchase.deliveredItems}</TableCell>
+                  <TableCell className={purchase.pendingItems > 0 ? 'text-orange-600' : 'text-gray-600'}>{purchase.pendingItems}</TableCell>
+                  <TableCell className="text-gray-600">{purchase.goodsReceivingNote || '-'}</TableCell>
+                  <TableCell className="text-gray-600">{purchase.deliveryNote || '-'}</TableCell>
                   <TableCell>{getStatusBadge(purchase.status)}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { Dashboard } from './components/pages/Dashboard';
@@ -13,15 +13,67 @@ import { ReportsPage } from './components/pages/ReportsPage';
 import { UsersPage } from './components/pages/UsersPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { LoginPage } from './components/auth/LoginPage';
+import { Toaster } from './components/ui/sonner';
 import { UserRole } from './types/auth';
 import type { QuickActionId } from './components/QuickActions';
 import type { Product } from './components/pages/ProductsPageEnhanced';
-import { BusinessExpense, StockMovement, SupplierOrderInvoice } from './types/supplierOrder';
-import { createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, saveDayBalance, saveSale, saveSupplierInvoice, updateProductStock, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
+import { BusinessExpense, ReorderRequest, StockMovement, SupplierOrderInvoice } from './types/supplierOrder';
+import { approveUser, createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, rejectUser, saveDayBalance, saveSale, saveSupplierInvoice, updateProductStock, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
 import type { BackendCustomer, BackendRole, BackendSupplier, BackendUser, CreateCustomerInput, LoginResult, RegistrationRole } from './services/api';
+import { toast } from 'sonner';
+import { canAccessModule, firstAccessibleModule, normalizeRole, type AppModuleId } from './services/permissions';
 
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
+const LOCAL_NOTIFICATION_STORAGE_KEY = 'pos-local-notifications';
 const refreshNotificationBell = () => window.dispatchEvent(new Event('pos:notifications-changed'));
+const mergeSupplierInvoices = (
+  currentInvoices: SupplierOrderInvoice[],
+  backendInvoices: SupplierOrderInvoice[]
+) => {
+  const backendIds = new Set(backendInvoices.map(invoice => invoice.id));
+  const pendingLocalInvoices = currentInvoices.filter(invoice =>
+    !backendIds.has(invoice.id) && invoice.status !== 'delivered'
+  );
+
+  return [...backendInvoices, ...pendingLocalInvoices].sort((a, b) => b.date.localeCompare(a.date));
+};
+const getLocalNotificationId = (key: string) => {
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = ((hash << 5) - hash) + key.charCodeAt(index);
+    hash |= 0;
+  }
+  return -Math.max(1, Math.abs(hash));
+};
+const pushLocalNotification = (title: string, message: string, key = `${title}:${message}`) => {
+  const notification = {
+    id: getLocalNotificationId(key),
+    title,
+    message,
+    channel: 'inventory',
+    severity: 'warning',
+    priority: 'high',
+    status: 'pending',
+    is_read: false,
+    created_at: new Date().toISOString()
+  };
+
+  try {
+    const saved = window.localStorage.getItem(LOCAL_NOTIFICATION_STORAGE_KEY);
+    const currentNotifications = saved ? JSON.parse(saved) as Array<typeof notification> : [];
+    const nextNotifications = [
+      notification,
+      ...currentNotifications.filter(item => item.id !== notification.id)
+    ].slice(0, 20);
+    window.localStorage.setItem(LOCAL_NOTIFICATION_STORAGE_KEY, JSON.stringify(nextNotifications));
+  } catch {
+    // The bell still receives the event even if storage is unavailable.
+  }
+
+  window.dispatchEvent(new CustomEvent('pos:local-notification', {
+    detail: notification
+  }));
+};
 const DRAWER_AUTO_CLOSE_MS = 24 * 60 * 60 * 1000;
 
 const createInitialDayBalance = (): DayBalance => ({
@@ -58,7 +110,7 @@ export default function App() {
       ? (JSON.parse(savedSales) as CompletedSale[]).map(sale => ({
           ...sale,
           cashAmount: sale.cashAmount ?? (sale.method.toLowerCase().startsWith('cash') ? sale.amount : 0),
-          cashier: sale.cashier ?? 'John Cashier',
+          cashier: sale.cashier ?? 'Cashier',
           timestamp: new Date(sale.timestamp)
         }))
       : [];
@@ -86,6 +138,60 @@ export default function App() {
   });
   const [users, setUsers] = useState<BackendUser[]>([]);
   const [customers, setCustomers] = useState<BackendCustomer[]>([]);
+  const [reorderRequest, setReorderRequest] = useState<ReorderRequest | null>(null);
+  const lowStockSnapshot = useRef('');
+  const notifiedLowStockProductIds = useRef(new Set<string>());
+  const pendingStockUpdates = useRef(new Map<string, number>());
+  const pendingSaleDetails = useRef(new Map<string, CompletedSale>());
+
+  const applyPendingStockUpdates = (nextProducts: POSProduct[]) =>
+    nextProducts.map(product => (
+      pendingStockUpdates.current.has(product.id)
+        ? { ...product, stock: pendingStockUpdates.current.get(product.id)! }
+        : product
+    ));
+
+  const mergeLiveSaleDetails = (backendSales: CompletedSale[]) => {
+    const mergedSales = backendSales.map((sale) => {
+      const pendingSale = pendingSaleDetails.current.get(sale.id);
+      if (!pendingSale) return sale;
+
+      return {
+        ...sale,
+        method: pendingSale.method,
+        cashAmount: pendingSale.cashAmount,
+        items: pendingSale.items.length > 0 ? pendingSale.items : sale.items,
+        cashier: sale.cashier || pendingSale.cashier,
+        customer: sale.customer || pendingSale.customer,
+        customerId: sale.customerId ?? pendingSale.customerId,
+        customerPhone: sale.customerPhone || pendingSale.customerPhone,
+        customerEmail: sale.customerEmail || pendingSale.customerEmail,
+        customerAccountReference: sale.customerAccountReference || pendingSale.customerAccountReference
+      };
+    });
+
+    pendingSaleDetails.current.forEach((pendingSale, saleId) => {
+      if (!mergedSales.some(sale => sale.id === saleId)) {
+        mergedSales.unshift(pendingSale);
+      }
+    });
+
+    return mergedSales;
+  };
+
+  const refreshBackendState = async (fallbackDayBalance = dayBalance) => {
+    const backendState = await loadBackendState(fallbackDayBalance);
+
+    setProducts(applyPendingStockUpdates(backendState.products));
+    setCompletedSales(mergeLiveSaleDetails(backendState.completedSales));
+    setSupplierInvoices(current => mergeSupplierInvoices(current, backendState.supplierInvoices));
+    setSuppliers(backendState.suppliers);
+    setCustomers(backendState.customers);
+    setUsers(backendState.users);
+    setIsBackendConnected(true);
+
+    return backendState;
+  };
 
   const cashSalesToday = completedSales
     .filter(sale => sale.timestamp.toISOString().slice(0, 10) === dayBalance.date)
@@ -102,10 +208,10 @@ export default function App() {
       .then((backendState) => {
         if (!isMounted) return;
 
-        setProducts(backendState.products);
-        setCompletedSales(backendState.completedSales);
+        setProducts(applyPendingStockUpdates(backendState.products));
+        setCompletedSales(mergeLiveSaleDetails(backendState.completedSales));
         setDayBalance(backendState.dayBalance.date === getTodayKey() ? backendState.dayBalance : createInitialDayBalance());
-        setSupplierInvoices(backendState.supplierInvoices);
+        setSupplierInvoices(current => mergeSupplierInvoices(current, backendState.supplierInvoices));
         setSuppliers(backendState.suppliers);
         setCustomers(backendState.customers);
         setUsers(backendState.users);
@@ -129,19 +235,11 @@ export default function App() {
     }
 
     const refreshLiveState = () => {
-      loadBackendState(dayBalance)
-        .then((backendState) => {
-          setProducts(backendState.products);
-          setCompletedSales(backendState.completedSales);
-          setSupplierInvoices(backendState.supplierInvoices);
-          setSuppliers(backendState.suppliers);
-          setCustomers(backendState.customers);
-          setUsers(backendState.users);
-        })
+      refreshBackendState(dayBalance)
         .catch(error => console.warn('Unable to refresh live backend state.', error));
     };
 
-    const timer = window.setInterval(refreshLiveState, 30000);
+    const timer = window.setInterval(refreshLiveState, 10000);
     return () => window.clearInterval(timer);
   }, [dayBalance, isAuthenticated, isBackendConnected]);
 
@@ -158,19 +256,28 @@ export default function App() {
   }, [dayBalance]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
+    const closeExpiredDrawer = () => {
       setDayBalance(previousBalance => {
         if (!isDrawerExpired(previousBalance)) return previousBalance;
-        return {
+
+        const nextDayBalance = {
           ...previousBalance,
           closingBalance: previousBalance.openingBalance + cashSalesToday,
           status: 'closed'
-        };
-      });
-    }, 60 * 1000);
+        } as DayBalance;
 
+        if (isBackendConnected) {
+          saveDayBalance(nextDayBalance).catch(error => console.warn('Unable to auto-close day balance in backend.', error));
+        }
+
+        return nextDayBalance;
+      });
+    };
+
+    closeExpiredDrawer();
+    const timer = window.setInterval(closeExpiredDrawer, 60 * 1000);
     return () => window.clearInterval(timer);
-  }, [cashSalesToday]);
+  }, [cashSalesToday, isBackendConnected]);
 
   useEffect(() => {
     window.localStorage.setItem('pos-supplier-invoices', JSON.stringify(supplierInvoices));
@@ -188,31 +295,63 @@ export default function App() {
     window.localStorage.setItem('pos-stock-movements', JSON.stringify(stockMovements));
   }, [stockMovements]);
 
+  useEffect(() => {
+    const lowStockProducts = products.filter(product => product.stock <= (product.reorderLevel || 10));
+    const lowStockIds = new Set(lowStockProducts.map(product => product.id));
+    const nextSnapshot = lowStockProducts.map(product => `${product.id}:${product.stock}`).sort().join('|');
+    lowStockProducts.forEach(product => {
+      const linkedSupplier = product.supplierName || suppliers.find(supplier => supplier.id === product.supplierId)?.name;
+      const stockChanged = lowStockSnapshot.current && nextSnapshot !== lowStockSnapshot.current;
+      if (!notifiedLowStockProductIds.current.has(product.id) || stockChanged) {
+        pushLocalNotification(
+          `${product.name} is low in stock`,
+          linkedSupplier
+            ? `${product.stock} ${product.uom} remaining. ${linkedSupplier} should be notified for replenishment.`
+            : `${product.stock} ${product.uom} remaining. Link or choose a supplier before replenishment.`,
+          `low-stock:${product.id}`
+        );
+        notifiedLowStockProductIds.current.add(product.id);
+      }
+    });
+    notifiedLowStockProductIds.current.forEach(productId => {
+      if (!lowStockIds.has(productId)) {
+        notifiedLowStockProductIds.current.delete(productId);
+      }
+    });
+    lowStockSnapshot.current = nextSnapshot;
+  }, [products, suppliers]);
+
   const handleItemClick = (itemId: string) => {
+    if (!userRole || !canAccessModule(itemId as AppModuleId, userRole)) {
+      toast.warning('Access restricted', {
+        description: 'Your role does not have access to that module.'
+      });
+      return;
+    }
     setActiveItem(itemId);
   };
 
   const handleQuickAction = (action: QuickActionId) => {
     switch (action) {
       case 'new-sale':
-        setActiveItem('pos');
+        handleItemClick('pos');
         break;
       case 'add-product':
-        setActiveItem('inventory');
+        handleItemClick('inventory');
         setQuickActionSignals(previousSignals => ({
           ...previousSignals,
           addProduct: previousSignals.addProduct + 1
         }));
         break;
       case 'add-customer':
-        setActiveItem('customers');
+        handleItemClick('customers');
         setQuickActionSignals(previousSignals => ({
           ...previousSignals,
           addCustomer: previousSignals.addCustomer + 1
         }));
         break;
       case 'quick-invoice':
-        setActiveItem('invoices');
+        handleItemClick('invoices');
         setQuickActionSignals(previousSignals => ({
           ...previousSignals,
           newInvoice: previousSignals.newInvoice + 1
@@ -222,16 +361,18 @@ export default function App() {
   };
 
   const finishAuthenticatedSession = async (username: string, role: UserRole) => {
+    const normalizedRole = normalizeRole(role);
     setIsAuthenticated(true);
-    setUserRole(role);
+    setUserRole(normalizedRole);
     setUserName(username);
+    setActiveItem(firstAccessibleModule(normalizedRole));
 
     try {
       const backendState = await loadBackendState(dayBalance);
 
-      setProducts(backendState.products);
-      setCompletedSales(backendState.completedSales);
-      setSupplierInvoices(backendState.supplierInvoices);
+      setProducts(applyPendingStockUpdates(backendState.products));
+      setCompletedSales(mergeLiveSaleDetails(backendState.completedSales));
+      setSupplierInvoices(current => mergeSupplierInvoices(current, backendState.supplierInvoices));
       setSuppliers(backendState.suppliers);
       setCustomers(backendState.customers);
       setUsers(backendState.users);
@@ -256,7 +397,7 @@ export default function App() {
     return result;
   };
 
-  const handleLogout = () => {
+  const performLogout = () => {
     apiLogout();
     setIsAuthenticated(false);
     setUserRole(null);
@@ -264,14 +405,41 @@ export default function App() {
     setActiveItem('dashboard');
   };
 
-  const handleTransactionComplete = (sale: CompletedSale) => {
-    setCompletedSales(previousSales => [sale, ...previousSales]);
-    setProducts(previousProducts => previousProducts.map(product => {
-      const soldUnits = sale.items
-        .filter(item => item.productId === product.id)
-        .reduce((sum, item) => sum + (item.stockUnits * item.quantity), 0);
+  const handleLogout = () => {
+    toast.warning('Confirm logout', {
+      description: 'Are you sure you want to log out of this session?',
+      action: {
+        label: 'Logout',
+        onClick: performLogout
+      },
+      cancel: {
+        label: 'Stay',
+        onClick: () => undefined
+      }
+    });
+  };
 
+  const handleTransactionComplete = (sale: CompletedSale) => {
+    pendingSaleDetails.current.set(sale.id, sale);
+    setCompletedSales(previousSales => [sale, ...previousSales]);
+    const soldUnitsByProduct = sale.items.reduce((totals, item) => {
+      totals.set(item.productId, (totals.get(item.productId) || 0) + (item.stockUnits * item.quantity));
+      return totals;
+    }, new Map<string, number>());
+    const nextStockByProduct = products.reduce((stockMap, product) => {
+      const soldUnits = soldUnitsByProduct.get(product.id) || 0;
+      if (soldUnits > 0) {
+        stockMap.set(product.id, Math.max(0, product.stock - soldUnits));
+      }
+      return stockMap;
+    }, new Map<string, number>());
+
+    setProducts(previousProducts => previousProducts.map(product => {
+      const soldUnits = soldUnitsByProduct.get(product.id) || 0;
       if (soldUnits === 0) return product;
+
+      pendingStockUpdates.current.set(product.id, Math.max(0, product.stock - soldUnits));
+
       return {
         ...product,
         stock: Math.max(0, product.stock - soldUnits)
@@ -291,8 +459,41 @@ export default function App() {
 
     if (isBackendConnected) {
       saveSale(sale)
+        .then((savedSale) => {
+          const liveSavedSale = {
+            ...savedSale,
+            method: sale.method,
+            cashAmount: sale.cashAmount,
+            items: sale.items,
+            cashier: savedSale.cashier || sale.cashier,
+            customer: savedSale.customer || sale.customer,
+            customerId: savedSale.customerId ?? sale.customerId,
+            customerPhone: savedSale.customerPhone || sale.customerPhone,
+            customerEmail: savedSale.customerEmail || sale.customerEmail,
+            customerAccountReference: savedSale.customerAccountReference || sale.customerAccountReference
+          };
+          pendingSaleDetails.current.delete(sale.id);
+          pendingSaleDetails.current.set(savedSale.id, liveSavedSale);
+
+          setCompletedSales(previousSales => [
+            liveSavedSale,
+            ...previousSales.filter(existingSale =>
+              existingSale.id !== sale.id && existingSale.id !== savedSale.id
+            )
+          ]);
+
+          return Promise.all(
+            Array.from(nextStockByProduct.entries()).map(([productId, nextStock]) =>
+              updateProductStock(productId, nextStock)
+                .then(() => {
+                  pendingStockUpdates.current.delete(productId);
+                })
+            )
+          );
+        })
+        .then(() => refreshBackendState(dayBalance))
         .then(refreshNotificationBell)
-        .catch(error => console.warn('Unable to save sale to backend.', error));
+        .catch(error => console.warn('Unable to save sale or update sold stock in backend.', error));
     }
   };
 
@@ -304,6 +505,13 @@ export default function App() {
           name: product.name,
           sku: product.sku,
           category: product.category,
+          brand: product.brand,
+          parentProduct: product.parentProduct,
+          variation: product.variation,
+          packSize: product.packSize,
+          modelNumber: product.modelNumber,
+          supplierId: product.supplierId,
+          supplierName: product.supplierName,
           uom: product.uom,
           prices: product.prices,
           stock: product.stock,
@@ -319,13 +527,26 @@ export default function App() {
       name: product.name,
       sku: product.sku,
       category_name: product.category,
+      generic_name: product.parentProduct,
+      brand: product.brand,
+      parent_product: product.parentProduct,
+      variation: product.variation,
+      pack_size: product.packSize,
+      model_number: product.modelNumber,
+      supplier_id: product.supplierId,
+      supplier_sku: product.supplierSku,
       base_unit_name: product.uom,
       price: product.prices.retail || 0,
       wholesale_price: product.prices.wholesale || product.prices.retail || 0,
+      corporate_price: product.prices.corporate || product.prices.wholesale || product.prices.retail || 0,
+      loyalty_price: product.prices.loyal || product.prices.retail || 0,
       cost_price: product.buyingPrice || 0,
       quantity: product.stock || 0,
       minimum_stock: product.reorderLevel || 0,
-      image_data: product.image || ''
+      maximum_stock: product.maximumStock,
+      tax_rate: product.tax || 0,
+      image_data: product.image || '',
+      notes: product.variation
     });
 
     setProducts(previousProducts => [savedProduct, ...previousProducts]);
@@ -340,7 +561,18 @@ export default function App() {
 
     setSupplierInvoices(previousInvoices => [newInvoice, ...previousInvoices]);
 
-    if (newInvoice.status === 'delivered' || newInvoice.status === 'paid') {
+    if (newInvoice.status === 'requested' || newInvoice.status === 'pending') {
+      const requestedSummary = newInvoice.orderItems && newInvoice.orderItems.length > 0
+        ? newInvoice.orderItems.map(item => `${item.requestedQuantity} ${item.productName}`).join(', ')
+        : `${newInvoice.quantityRequested || newInvoice.items} item${(newInvoice.quantityRequested || newInvoice.items) === 1 ? '' : 's'}`;
+      pushLocalNotification(
+        `${newInvoice.supplierName} notified`,
+        `Stock request sent for ${requestedSummary}. Pending delivery confirmation.`,
+        `supplier-notified:${newInvoice.id}`
+      );
+    }
+
+    if (newInvoice.status === 'delivered') {
       setExpenses(previousExpenses => [
         {
           id: `EXP-${newInvoice.id}`,
@@ -356,32 +588,29 @@ export default function App() {
       ]);
     }
 
-    if (newInvoice.status === 'delivered' && newInvoice.productId && newInvoice.quantityDelivered) {
-      const deliveredProduct = products.find(product => product.id === newInvoice.productId);
-      const nextStock = (deliveredProduct?.stock || 0) + newInvoice.quantityDelivered;
-      setProducts(previousProducts => previousProducts.map(product =>
-        product.id === newInvoice.productId
-          ? { ...product, stock: product.stock + (newInvoice.quantityDelivered || 0) }
-          : product
-      ));
+    const deliveredItems = newInvoice.status === 'delivered'
+      ? (newInvoice.orderItems || []).filter(item => item.deliveredQuantity > 0)
+      : [];
+
+    if (deliveredItems.length > 0) {
+      setProducts(previousProducts => previousProducts.map(product => {
+        const deliveredItem = deliveredItems.find(item => item.productId === product.id);
+        return deliveredItem
+          ? { ...product, stock: product.stock + deliveredItem.deliveredQuantity }
+          : product;
+      }));
       setStockMovements(previousMovements => [
-        {
-          id: `MOV-${newInvoice.id}`,
-          item: newInvoice.productName || 'Supplier delivery',
-          type: 'in',
-          quantity: newInvoice.quantityDelivered || 0,
+        ...deliveredItems.map(item => ({
+          id: `MOV-${newInvoice.id}-${item.productId}`,
+          item: item.productName,
+          type: 'in' as const,
+          quantity: item.deliveredQuantity,
           date: newInvoice.date,
-          reason: `Supplier delivery ${newInvoice.id}`,
+          reason: `GRN ${newInvoice.goodsReceivingNote || newInvoice.id}`,
           sourceInvoiceId: newInvoice.id
-        },
+        })),
         ...previousMovements
       ]);
-
-      if (isBackendConnected) {
-        updateProductStock(newInvoice.productId, nextStock)
-          .then(refreshNotificationBell)
-          .catch(error => console.warn('Unable to update delivered stock in backend.', error));
-      }
     }
 
     if (isBackendConnected) {
@@ -394,7 +623,11 @@ export default function App() {
                   status: newInvoice.status,
                   productId: newInvoice.productId,
                   productName: newInvoice.productName,
-                  quantityDelivered: newInvoice.quantityDelivered
+                  quantityRequested: newInvoice.quantityRequested,
+                  quantityDelivered: newInvoice.quantityDelivered,
+                  quantityPending: newInvoice.quantityPending,
+                  orderItems: newInvoice.orderItems,
+                  goodsReceivingNote: newInvoice.goodsReceivingNote
                 }
               : existingInvoice
           ));
@@ -416,14 +649,7 @@ export default function App() {
       return;
     }
 
-    const savedSupplier = await createSupplier({
-      name: supplier.name,
-      contact_person: supplier.contact_person,
-      phone: supplier.phone,
-      email: supplier.email,
-      address: supplier.address,
-      notes: supplier.notes
-    });
+    const savedSupplier = await createSupplier(supplier);
 
     setSuppliers(previousSuppliers => [savedSupplier, ...previousSuppliers]);
   };
@@ -457,7 +683,9 @@ export default function App() {
     if (!product) return;
 
     if (type === 'out' && quantity > product.stock) {
-      alert(`Only ${product.stock} ${product.uom} available for ${product.name}.`);
+      toast.warning('Insufficient stock', {
+        description: `Only ${product.stock} ${product.uom} available for ${product.name}.`
+      });
       return;
     }
 
@@ -526,6 +754,18 @@ export default function App() {
     refreshNotificationBell();
   };
 
+  const handleUserApproved = async (userId: number) => {
+    const approvedUser = await approveUser(userId);
+    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? approvedUser : user));
+    refreshNotificationBell();
+  };
+
+  const handleUserRejected = async (userId: number) => {
+    const rejectedUser = await rejectUser(userId);
+    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? rejectedUser : user));
+    refreshNotificationBell();
+  };
+
   const handleDownloadProductImportTemplate = async () => {
     const template = await downloadProductImportTemplate();
     const url = window.URL.createObjectURL(template);
@@ -559,13 +799,236 @@ export default function App() {
     const backendState = await loadBackendState(dayBalance);
 
     setProducts(backendState.products);
-    setCompletedSales(backendState.completedSales);
-    setSupplierInvoices(backendState.supplierInvoices);
+    setCompletedSales(mergeLiveSaleDetails(backendState.completedSales));
+    setSupplierInvoices(current => mergeSupplierInvoices(current, backendState.supplierInvoices));
     setSuppliers(backendState.suppliers);
     setCustomers(backendState.customers);
     setUsers(backendState.users);
 
     return result;
+  };
+
+  const handleInventoryReorder = (productId: string) => {
+    const product = products.find(item => item.id === productId);
+    if (!product) return;
+
+    const invoiceSupplier = supplierInvoices.find(invoice => invoice.productId === productId);
+    const fallbackSupplier = suppliers.find(supplier => supplier.is_active !== false);
+    const supplierId = product.supplierId || invoiceSupplier?.supplierId || fallbackSupplier?.id;
+    const supplierName = product.supplierName || invoiceSupplier?.supplierName || fallbackSupplier?.name;
+    const reorderLevel = product.reorderLevel || 10;
+    const suggestedQuantity = Math.max(1, Math.ceil((reorderLevel * 2) - product.stock));
+    const suggestedAmount = Number(((product.prices.wholesale || product.prices.retail || 0) * suggestedQuantity).toFixed(2));
+
+    setReorderRequest({
+      signal: Date.now(),
+      productId,
+      supplierId,
+      supplierName,
+      suggestedQuantity,
+      suggestedAmount
+    });
+    setActiveItem('procurement');
+    pushLocalNotification(
+      `Reorder started for ${product.name}`,
+      supplierName
+        ? `${supplierName} notified for ${suggestedQuantity} ${product.uom}. You can change supplier before sending.`
+        : `${suggestedQuantity} ${product.uom} queued. Choose a supplier to continue.`,
+      `reorder-started:${product.id}`
+    );
+  };
+
+  const nextPurchaseOrderNumber = (offset = 0) => {
+    const year = new Date().getFullYear();
+    const prefix = `PO-${year}-`;
+    const maxNumber = supplierInvoices.reduce((max, invoice) => {
+      if (!invoice.id.startsWith(prefix)) return max;
+      const numericPart = Number(invoice.id.slice(prefix.length));
+      return Number.isFinite(numericPart) ? Math.max(max, numericPart) : max;
+    }, 0);
+    return `${prefix}${String(maxNumber + offset + 1).padStart(3, '0')}`;
+  };
+
+  const handleLowStockPurchaseOrdersCreated = (items: Array<{ productId: string; quantity: number }>) => {
+    const requestedItems = items
+      .map(item => {
+        const product = products.find(existingProduct => existingProduct.id === item.productId);
+        if (!product) return null;
+
+        const invoiceSupplier = supplierInvoices.find(invoice => invoice.productId === product.id);
+        const supplierId = product.supplierId || invoiceSupplier?.supplierId;
+        const supplierName = product.supplierName || invoiceSupplier?.supplierName;
+
+        if (!supplierId || !supplierName) {
+          return {
+            product,
+            quantity: item.quantity,
+            supplierId: 0,
+            supplierName: ''
+          };
+        }
+
+        return {
+          product,
+          quantity: item.quantity,
+          supplierId,
+          supplierName
+        };
+      })
+      .filter((item): item is { product: POSProduct; quantity: number; supplierId: number; supplierName: string } => Boolean(item));
+
+    const missingSupplierItems = requestedItems.filter(item => !item.supplierId || !item.supplierName);
+    if (missingSupplierItems.length > 0) {
+      toast.warning('Some items have no linked supplier', {
+        description: `${missingSupplierItems.map(item => item.product.name).join(', ')} must be linked to a supplier before creating a purchase order.`
+      });
+    }
+
+    const validItems = requestedItems.filter(item => item.supplierId && item.supplierName && item.quantity > 0);
+    if (validItems.length === 0) {
+      toast.warning('No purchase order created', {
+        description: 'Select items with linked suppliers and quantities greater than zero.'
+      });
+      return;
+    }
+
+    const groupedBySupplier = validItems.reduce((groups, item) => {
+      const key = String(item.supplierId);
+      const group = groups.get(key) || {
+        supplierId: item.supplierId,
+        supplierName: item.supplierName,
+        items: [] as typeof validItems
+      };
+      group.items.push(item);
+      groups.set(key, group);
+      return groups;
+    }, new Map<string, { supplierId: number; supplierName: string; items: typeof validItems }>());
+
+    const newInvoices = Array.from(groupedBySupplier.values()).map((group, index) => {
+      const orderItems = group.items.map(item => {
+        const unitCost = item.product.prices.wholesale || item.product.prices.retail || 0;
+        return {
+          productId: item.product.id,
+          productName: item.product.name,
+          requestedQuantity: item.quantity,
+          deliveredQuantity: 0,
+          pendingQuantity: item.quantity,
+          unitCost
+        };
+      });
+      const quantityRequested = orderItems.reduce((sum, item) => sum + item.requestedQuantity, 0);
+      const amount = orderItems.reduce((sum, item) => sum + (item.requestedQuantity * item.unitCost), 0);
+
+      return {
+        id: nextPurchaseOrderNumber(index),
+        supplierId: group.supplierId,
+        supplierName: group.supplierName,
+        contact: '',
+        date: getTodayKey(),
+        amount: Number(amount.toFixed(2)),
+        status: 'requested' as const,
+        items: orderItems.length,
+        orderItems,
+        paymentMethod: 'Credit',
+        quantityRequested,
+        quantityDelivered: 0,
+        quantityPending: quantityRequested,
+        deliveryNote: 'Created from low-stock reorder suggestions'
+      };
+    });
+
+    setSupplierInvoices(previousInvoices => [
+      ...newInvoices,
+      ...previousInvoices
+    ]);
+
+    if (isBackendConnected) {
+      Promise.all(newInvoices.map(invoice => saveSupplierInvoice(invoice)))
+        .then(refreshNotificationBell)
+        .catch(error => console.warn('Unable to save low-stock purchase orders to backend.', error));
+    }
+
+    setActiveItem('procurement');
+    toast.success('Purchase order requested', {
+      description: `${newInvoices.length} requested purchase order${newInvoices.length === 1 ? '' : 's'} created.`
+    });
+    pushLocalNotification(
+      'Low-stock purchase order requested',
+      `${validItems.length} item${validItems.length === 1 ? '' : 's'} queued across ${newInvoices.length} supplier order${newInvoices.length === 1 ? '' : 's'}.`,
+      `low-stock-po:${newInvoices.map(invoice => invoice.id).join(',')}`
+    );
+  };
+
+  const handleOutOfStockReorder = (productIds: string[]) => {
+    const outOfStockProducts = products.filter(product =>
+      productIds.includes(product.id) && product.stock === 0
+    );
+
+    if (outOfStockProducts.length === 0) {
+      toast.info('No out-of-stock items selected', {
+        description: 'Bulk reorder only creates requests for products with stock at 0.'
+      });
+      return;
+    }
+
+    const fallbackSupplier = suppliers.find(supplier => supplier.is_active !== false);
+    const batchId = Date.now();
+    const newInvoices = outOfStockProducts.map((product) => {
+      const invoiceSupplier = supplierInvoices.find(invoice => invoice.productId === product.id);
+      const supplierId = product.supplierId || invoiceSupplier?.supplierId || fallbackSupplier?.id || 0;
+      const supplierName = product.supplierName || invoiceSupplier?.supplierName || fallbackSupplier?.name || 'Choose supplier';
+      const reorderLevel = product.reorderLevel || 10;
+      const suggestedQuantity = Math.max(1, reorderLevel * 2);
+      const unitCost = product.prices.wholesale || product.prices.retail || 0;
+
+      return {
+        supplierId,
+        supplierName,
+        contact: '',
+        date: getTodayKey(),
+        amount: Number((unitCost * suggestedQuantity).toFixed(2)),
+        status: 'requested' as const,
+        items: 1,
+        paymentMethod: 'Credit',
+        productId: product.id,
+        productName: product.name,
+        quantityRequested: suggestedQuantity,
+        quantityDelivered: 0,
+        quantityPending: suggestedQuantity,
+        orderItems: [{
+          productId: product.id,
+          productName: product.name,
+          requestedQuantity: suggestedQuantity,
+          deliveredQuantity: 0,
+          pendingQuantity: suggestedQuantity,
+          unitCost
+        }]
+      };
+    });
+
+    setSupplierInvoices(previousInvoices => [
+      ...newInvoices.map((invoice, index) => ({
+        ...invoice,
+        id: `SUP-INV-OUT-${batchId}-${index + 1}`
+      })),
+      ...previousInvoices
+    ]);
+
+    if (isBackendConnected) {
+      Promise.all(newInvoices.map(invoice => saveSupplierInvoice({
+        ...invoice,
+        id: `SUP-INV-OUT-${batchId}-${invoice.productId}`
+      })))
+        .then(refreshNotificationBell)
+        .catch(error => console.warn('Unable to save out-of-stock reorder requests to backend.', error));
+    }
+
+    setActiveItem('procurement');
+    pushLocalNotification(
+      'Out-of-stock reorder requests created',
+      `${outOfStockProducts.length} item${outOfStockProducts.length === 1 ? '' : 's'} queued. Linked suppliers have been selected where available; change supplier before sending if needed.`,
+      `out-of-stock-reorder:${outOfStockProducts.map(product => product.id).sort().join(',')}`
+    );
   };
 
   const handleExpenseCreated = (expense: Omit<BusinessExpense, 'id'>) => {
@@ -611,6 +1074,17 @@ export default function App() {
   };
 
   const renderContent = () => {
+    if (userRole && !canAccessModule(activeItem as AppModuleId, userRole)) {
+      const fallbackModule = firstAccessibleModule(userRole);
+      window.setTimeout(() => setActiveItem(fallbackModule), 0);
+      return (
+        <div className="rounded-md border border-orange-200 bg-orange-50 p-4 text-orange-900">
+          <h2 className="font-semibold">Access restricted</h2>
+          <p className="mt-1 text-sm">Your role cannot access this module. Redirecting to an allowed page.</p>
+        </div>
+      );
+    }
+
     switch (activeItem) {
       case 'dashboard':
         return (
@@ -627,8 +1101,10 @@ export default function App() {
         return (
           <POSPage
             products={products}
+            customers={customers}
             dayBalance={dayBalance}
             cashSalesToday={cashSalesToday}
+            cashierName={userName || 'Cashier'}
             onOpenDay={handleOpenDay}
             onCloseDay={handleCloseDay}
             onTransactionComplete={handleTransactionComplete}
@@ -668,6 +1144,8 @@ export default function App() {
             products={products}
             suppliers={suppliers}
             supplierInvoices={supplierInvoices}
+            reorderRequest={reorderRequest}
+            onReorderProduct={handleInventoryReorder}
             onSupplierCreated={handleSupplierCreated}
             onSupplierOrderCreated={handleSupplierOrderCreated}
           />
@@ -676,6 +1154,8 @@ export default function App() {
         return (
           <InventoryPage
             products={products}
+            suppliers={suppliers}
+            supplierInvoices={supplierInvoices}
             stockMovements={stockMovements}
             openAddItemSignal={quickActionSignals.addProduct}
             onStockAdjustment={handleInventoryStockAdjustment}
@@ -683,6 +1163,8 @@ export default function App() {
             onBulkImportItems={handleBulkProductImport}
             onDownloadImportTemplate={handleDownloadProductImportTemplate}
             onDownloadAvailableItems={handleDownloadAvailableProducts}
+            onReorderOutOfStock={handleOutOfStockReorder}
+            onCreateReorderPurchaseOrders={handleLowStockPurchaseOrdersCreated}
           />
         );
       case 'expenses':
@@ -704,6 +1186,8 @@ export default function App() {
             onCreateUser={handleUserCreated}
             onUpdateUser={handleUserUpdated}
             onDeactivateUser={handleUserDeactivated}
+            onApproveUser={handleUserApproved}
+            onRejectUser={handleUserRejected}
           />
         );
       case 'settings':
@@ -723,11 +1207,17 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    return <LoginPage onLogin={handleLogin} onVerifyTwoFactor={handleVerifyTwoFactor} />;
+    return (
+      <>
+        <LoginPage onLogin={handleLogin} onVerifyTwoFactor={handleVerifyTwoFactor} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="animate-soft-pop min-h-screen bg-gray-50 flex flex-col">
+      <Toaster richColors position="top-right" />
       {/* Top Header with Time and Notifications */}
       <TopHeader />
       
@@ -743,9 +1233,11 @@ export default function App() {
         />
         
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto scroll-smooth">
           <div className="max-w-7xl mx-auto p-8">
-            {renderContent()}
+            <div key={activeItem} className="animate-page-enter">
+              {renderContent()}
+            </div>
           </div>
         </div>
       </div>

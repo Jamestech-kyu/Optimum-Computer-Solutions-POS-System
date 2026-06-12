@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, ReferenceLine } from 'recharts';
 import { Download, TrendingUp, DollarSign, ShoppingCart, Users, Package, Receipt } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
 import type { BusinessExpense, SupplierOrderInvoice } from '../../types/supplierOrder';
@@ -30,6 +30,21 @@ const rangeDays: Record<DateRange, number> = {
 const shortDate = (date: Date) => date.toISOString().slice(0, 10);
 const monthKey = (date: Date) => date.toLocaleString('en-US', { month: 'short' });
 const toDate = (value: string | Date) => value instanceof Date ? value : new Date(value);
+const axisColor = '#64748B';
+const gridColor = '#E2E8F0';
+const tooltipStyle = {
+  backgroundColor: '#ffffff',
+  border: '1px solid #E2E8F0',
+  borderRadius: '8px',
+  boxShadow: '0 18px 45px -24px rgb(15 23 42 / 0.45)',
+  color: '#0F172A'
+};
+const compactCurrency = (value: number) => {
+  if (Math.abs(value) >= 1000000) return `${formatCurrency(value / 1000000)}M`;
+  if (Math.abs(value) >= 1000) return `${formatCurrency(value / 1000)}K`;
+  return formatCurrency(value);
+};
+const shortLabel = (value: string) => value.length > 18 ? `${value.slice(0, 18)}...` : value;
 
 export function ReportsPage({ products, completedSales, expenses, supplierInvoices, dayBalance }: ReportsPageProps) {
   const [dateRange, setDateRange] = useState<DateRange>('30days');
@@ -52,7 +67,7 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
   const uniqueCustomers = new Set(filteredSales.map(sale => sale.customer || 'Walk-in Customer')).size;
   const inventoryValue = products.reduce((sum, product) => sum + product.stock * product.prices.wholesale, 0);
   const outstandingSupplierBalance = supplierInvoices
-    .filter(invoice => invoice.status === 'pending' || invoice.status === 'overdue')
+    .filter(invoice => invoice.status === 'requested' || invoice.status === 'pending')
     .reduce((sum, invoice) => sum + invoice.amount, 0);
   const grossProfit = revenue - expenseTotal;
 
@@ -254,35 +269,41 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
 
         <TabsContent value="sales">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card className="bg-white border-gray-200">
-              <CardHeader>
+            <Card className="bg-white border-gray-200 shadow-sm">
+              <CardHeader className="pb-2">
                 <CardTitle className="text-gray-900">Revenue Trend</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={salesTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis dataKey="name" stroke="#9CA3AF" />
-                    <YAxis stroke="#9CA3AF" />
-                    <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                    <Line type="monotone" dataKey="revenue" stroke="#10B981" strokeWidth={2} />
-                  </LineChart>
+                  <AreaChart data={salesTrend} margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="reportRevenueGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#059669" stopOpacity={0.28} />
+                        <stop offset="95%" stopColor="#059669" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 6" stroke={gridColor} vertical={false} />
+                    <XAxis dataKey="name" stroke={axisColor} tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                    <YAxis stroke={axisColor} tickLine={false} axisLine={false} width={72} tickFormatter={(value) => compactCurrency(Number(value))} tick={{ fontSize: 12 }} />
+                    <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={tooltipStyle} labelStyle={{ color: '#334155', fontWeight: 600 }} />
+                    <Area type="monotone" dataKey="revenue" name="Revenue" stroke="#059669" strokeWidth={3} fill="url(#reportRevenueGradient)" dot={{ r: 3, fill: '#059669', stroke: '#ffffff', strokeWidth: 2 }} activeDot={{ r: 6, fill: '#059669', stroke: '#D1FAE5', strokeWidth: 4 }} />
+                  </AreaChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
 
-            <Card className="bg-white border-gray-200">
-              <CardHeader>
+            <Card className="bg-white border-gray-200 shadow-sm">
+              <CardHeader className="pb-2">
                 <CardTitle className="text-gray-900">Transactions Overview</CardTitle>
               </CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={salesTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                    <XAxis dataKey="name" stroke="#9CA3AF" />
-                    <YAxis stroke="#9CA3AF" />
-                    <Tooltip />
-                    <Bar dataKey="transactions" fill="#3B82F6" />
+                  <BarChart data={salesTrend} margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="4 6" stroke={gridColor} vertical={false} />
+                    <XAxis dataKey="name" stroke={axisColor} tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                    <YAxis stroke={axisColor} tickLine={false} axisLine={false} width={42} allowDecimals={false} tick={{ fontSize: 12 }} />
+                    <Tooltip contentStyle={tooltipStyle} />
+                    <Bar dataKey="transactions" name="Transactions" fill="#2563EB" radius={[6, 6, 0, 0]} maxBarSize={44} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -291,19 +312,20 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
         </TabsContent>
 
         <TabsContent value="products">
-          <Card className="bg-white border-gray-200">
-            <CardHeader>
+          <Card className="bg-white border-gray-200 shadow-sm">
+            <CardHeader className="pb-2">
               <CardTitle className="text-gray-900">Product Performance</CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={productPerformance} layout="horizontal">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis type="number" stroke="#9CA3AF" />
-                  <YAxis dataKey="name" type="category" stroke="#9CA3AF" width={140} />
-                  <Tooltip />
-                  <Bar dataKey="revenue" fill="#8B5CF6" name="Revenue" />
-                  <Bar dataKey="stock" fill="#14B8A6" name="Stock" />
+                <BarChart data={productPerformance} layout="vertical" margin={{ top: 10, right: 24, left: 18, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="4 6" stroke={gridColor} horizontal={false} />
+                  <XAxis type="number" stroke={axisColor} tickLine={false} axisLine={false} tickFormatter={(value) => compactCurrency(Number(value))} tick={{ fontSize: 12 }} />
+                  <YAxis dataKey="name" type="category" stroke={axisColor} tickLine={false} axisLine={false} width={150} tickFormatter={shortLabel} tick={{ fontSize: 12 }} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={(value, name) => name === 'Revenue' ? formatCurrency(Number(value)) : Number(value).toFixed(0)} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
+                  <Bar dataKey="revenue" fill="#7C3AED" name="Revenue" radius={[0, 6, 6, 0]} />
+                  <Bar dataKey="stock" fill="#0891B2" name="Stock" radius={[0, 6, 6, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>
@@ -311,21 +333,23 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
         </TabsContent>
 
         <TabsContent value="profit">
-          <Card className="bg-white border-gray-200">
-            <CardHeader>
+          <Card className="bg-white border-gray-200 shadow-sm">
+            <CardHeader className="pb-2">
               <CardTitle className="text-gray-900">Profit & Loss Analysis</CardTitle>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={profitData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="name" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
-                  <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                  <Bar dataKey="revenue" fill="#10B981" name="Revenue" />
-                  <Bar dataKey="expenses" fill="#EF4444" name="Expenses" />
-                  <Bar dataKey="supplierSpend" fill="#F59E0B" name="Supplier Purchases" />
-                  <Bar dataKey="profit" fill="#3B82F6" name="Profit" />
+                <BarChart data={profitData} margin={{ top: 10, right: 24, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="4 6" stroke={gridColor} vertical={false} />
+                  <XAxis dataKey="name" stroke={axisColor} tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                  <YAxis stroke={axisColor} tickLine={false} axisLine={false} width={72} tickFormatter={(value) => compactCurrency(Number(value))} tick={{ fontSize: 12 }} />
+                  <ReferenceLine y={0} stroke="#94A3B8" />
+                  <Tooltip formatter={(value) => formatCurrency(Number(value))} contentStyle={tooltipStyle} />
+                  <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
+                  <Bar dataKey="revenue" fill="#059669" name="Revenue" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="expenses" fill="#DC2626" name="Expenses" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="supplierSpend" fill="#D97706" name="Supplier Purchases" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="profit" fill="#2563EB" name="Profit" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </CardContent>

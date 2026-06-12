@@ -1,4 +1,13 @@
-export type SupplierOrderStatus = 'paid' | 'pending' | 'overdue' | 'delivered';
+export type SupplierOrderStatus = 'requested' | 'pending' | 'delivered';
+
+export interface SupplierOrderItem {
+  productId: string;
+  productName: string;
+  requestedQuantity: number;
+  deliveredQuantity: number;
+  pendingQuantity: number;
+  unitCost: number;
+}
 
 export interface SupplierOrderInvoice {
   id: string;
@@ -9,10 +18,24 @@ export interface SupplierOrderInvoice {
   amount: number;
   status: SupplierOrderStatus;
   items: number;
+  orderItems?: SupplierOrderItem[];
   paymentMethod: string;
+  deliveryNote?: string;
+  goodsReceivingNote?: string;
   productId?: string;
   productName?: string;
   quantityDelivered?: number;
+  quantityRequested?: number;
+  quantityPending?: number;
+}
+
+export interface ReorderRequest {
+  signal: number;
+  productId: string;
+  supplierId?: number;
+  supplierName?: string;
+  suggestedQuantity?: number;
+  suggestedAmount?: number;
 }
 
 export interface BusinessExpense {

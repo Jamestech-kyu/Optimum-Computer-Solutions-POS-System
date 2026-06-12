@@ -17,20 +17,21 @@ import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { UserRole } from '../types/auth';
 import { useAppLanguage } from '../services/language';
+import { canAccessModule, roleLabel, type AppModuleId } from '../services/permissions';
 
 const allMenuItems = [
-  { icon: Home, label: 'Dashboard', id: 'dashboard', roles: ['admin', 'manager', 'cashier', 'storekeeper', 'accountant'] },
-  { icon: ShoppingCart, label: 'POS / Sales', id: 'pos', roles: ['admin', 'manager', 'cashier'] },
-  { icon: FileText, label: 'Invoices', id: 'invoices', roles: ['admin', 'manager', 'cashier', 'accountant'] },
-  { icon: Users, label: 'Customers', id: 'customers', roles: ['admin', 'manager', 'cashier'] },
-  { icon: Package, label: 'Products / Items', id: 'products', roles: ['admin', 'manager', 'storekeeper'] },
-  { icon: Truck, label: 'Procurement', id: 'procurement', roles: ['admin', 'manager', 'storekeeper'] },
-  { icon: BarChart3, label: 'Inventory', id: 'inventory', roles: ['admin', 'manager', 'storekeeper'] },
-  { icon: CreditCard, label: 'Expenses', id: 'expenses', roles: ['admin', 'manager', 'accountant'] },
-  { icon: TrendingUp, label: 'Reports', id: 'reports', roles: ['admin', 'manager', 'accountant'] },
-  { icon: UserCheck, label: 'Users / Staff', id: 'users', roles: ['admin', 'manager'] },
-  { icon: Settings, label: 'Settings', id: 'settings', roles: ['admin', 'manager'] }
-];
+  { icon: Home, label: 'Dashboard', id: 'dashboard' },
+  { icon: ShoppingCart, label: 'POS / Sales', id: 'pos' },
+  { icon: FileText, label: 'Invoices', id: 'invoices' },
+  { icon: Users, label: 'Customers', id: 'customers' },
+  { icon: Package, label: 'Stock levels', id: 'products' },
+  { icon: Truck, label: 'Procurement', id: 'procurement' },
+  { icon: BarChart3, label: 'Inventory', id: 'inventory' },
+  { icon: CreditCard, label: 'Expenses', id: 'expenses' },
+  { icon: TrendingUp, label: 'Reports', id: 'reports' },
+  { icon: UserCheck, label: 'Users / Staff', id: 'users' },
+  { icon: Settings, label: 'Settings', id: 'settings' }
+] satisfies Array<{ icon: typeof Home; label: string; id: AppModuleId }>;
 
 interface SidebarProps {
   activeItem: string;
@@ -42,12 +43,12 @@ interface SidebarProps {
 
 export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName }: SidebarProps) {
   const { t } = useAppLanguage();
-  const filteredMenuItems = allMenuItems.filter(item => 
-    item.roles.includes(userRole)
-  );
+  const filteredMenuItems = allMenuItems.filter(item => canAccessModule(item.id, userRole));
 
   const getRoleBadgeColor = (role: UserRole) => {
     switch(role) {
+      case 'super_admin':
+        return 'bg-red-100 text-red-800';
       case 'admin':
         return 'bg-red-100 text-red-800';
       case 'cashier':
@@ -57,7 +58,10 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
       case 'manager':
         return 'bg-emerald-100 text-emerald-800';
       case 'storekeeper':
+      case 'inventory_clerk':
         return 'bg-amber-100 text-amber-800';
+      case 'viewer':
+        return 'bg-slate-100 text-slate-800';
       case 'customer':
         return 'bg-gray-100 text-gray-800';
     }
@@ -76,7 +80,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
         <p className="text-xs text-gray-500 mb-1">{t('Logged in as')}</p>
         <p className="text-sm font-semibold text-gray-900">{userName}</p>
         <Badge className={`mt-2 ${getRoleBadgeColor(userRole)}`}>
-          {userRole.charAt(0).toUpperCase() + userRole.slice(1)}
+          {roleLabel(userRole)}
         </Badge>
       </div>
 

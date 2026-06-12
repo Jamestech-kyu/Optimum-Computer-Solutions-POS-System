@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Plus, Search, Edit, Trash2, TrendingUp, BarChart3 } from 'lucide-react';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import type { POSProduct } from './POSPageEnhanced';
+import { toast } from 'sonner';
 
 export type UnitOfMeasurement = 'pcs' | 'kg' | 'liter' | 'meter' | 'dozen' | 'box' | 'pack' | 'carton';
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
@@ -18,6 +19,11 @@ export interface Product {
   name: string;
   sku: string;
   category: string;
+  brand?: string;
+  parentProduct?: string;
+  variation?: string;
+  packSize?: string;
+  modelNumber?: string;
   buyingPrice: number;
   prices: {
     retail: number;
@@ -29,6 +35,10 @@ export interface Product {
   uom: string;
   stock: number;
   reorderLevel: number;
+  maximumStock?: number;
+  supplierId?: number;
+  supplierName?: string;
+  supplierSku?: string;
   image: string;
   tax: number;
 }
@@ -51,12 +61,19 @@ const mapLiveProduct = (product: POSProduct): Product => {
     name: product.name,
     sku: product.sku,
     category: product.category,
+    brand: product.brand,
+    parentProduct: product.parentProduct,
+    variation: product.variation,
+    packSize: product.packSize,
+    modelNumber: product.modelNumber,
     buyingPrice,
     prices: product.prices,
     profitMargin: buyingPrice > 0 ? ((retail - buyingPrice) / buyingPrice) * 100 : 0,
     uom: product.uom,
     stock: product.stock,
     reorderLevel: 5,
+    supplierId: product.supplierId,
+    supplierName: product.supplierName,
     image: product.image,
     tax: product.tax
   };
@@ -68,6 +85,14 @@ const readImageAsDataUrl = (file: File) => new Promise<string>((resolve, reject)
   reader.onerror = () => reject(reader.error);
   reader.readAsDataURL(file);
 });
+
+const buildSpecificProductName = (product: Partial<Product>) => [
+  product.brand,
+  product.parentProduct || product.name,
+  product.variation,
+  product.packSize,
+  product.modelNumber
+].map(part => String(part || '').trim()).filter(Boolean).join(' ');
 
 export function ProductsPageEnhanced({
   products: liveProducts,
@@ -96,8 +121,16 @@ export function ProductsPageEnhanced({
   const categories = ['All', ...new Set(products.map(p => p.category))];
 
   const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         product.sku.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchableText = [
+      product.name,
+      product.sku,
+      product.brand,
+      product.parentProduct,
+      product.variation,
+      product.packSize,
+      product.modelNumber
+    ].join(' ').toLowerCase();
+    const matchesSearch = searchableText.includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'All' || product.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
@@ -152,11 +185,13 @@ export function ProductsPageEnhanced({
     e.preventDefault();
     setFormError('');
     
-    const requiredFields = ['name', 'sku', 'category', 'buyingPrice', 'uom'];
+    const requiredFields = ['parentProduct', 'brand', 'sku', 'category', 'buyingPrice', 'uom'];
     if (!requiredFields.every(field => formData[field as keyof Product])) {
-      setFormError('Please fill all required fields.');
+      setFormError('Please fill brand, generic product, SKU/barcode, category, buying price, and unit.');
       return;
     }
+
+    const specificName = (formData.name || '').trim() || buildSpecificProductName(formData);
 
     setIsSubmitting(true);
 
@@ -165,9 +200,14 @@ export function ProductsPageEnhanced({
     } else {
       const newProduct: Product = {
         id: Date.now().toString(),
-        name: formData.name || '',
+        name: specificName,
         sku: formData.sku || '',
         category: formData.category || '',
+        brand: formData.brand || '',
+        parentProduct: formData.parentProduct || '',
+        variation: formData.variation || '',
+        packSize: formData.packSize || '',
+        modelNumber: formData.modelNumber || '',
         buyingPrice: formData.buyingPrice || 0,
         prices: formData.prices || { retail: 0, wholesale: 0, corporate: 0, loyal: 0 },
         profitMargin: formData.profitMargin || 0,
@@ -211,7 +251,7 @@ export function ProductsPageEnhanced({
         setLocalProducts(previous => previous.filter(p => p.id !== id));
       } catch (error) {
         console.error('Could not delete product', error);
-        alert('Product could not be deleted.');
+        toast.error('Product could not be deleted.');
       }
     } else {
       setLocalProducts(localProducts.filter(p => p.id !== id));
@@ -259,26 +299,30 @@ export function ProductsPageEnhanced({
           <CardTitle>Product Catalog</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="relative md:col-span-2">
+          <div className="grid grid-cols-1 gap-4">
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <Input
-                placeholder="Search by name or SKU..."
+                placeholder="Search by name, SKU, brand, category, variant..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 bg-white border-gray-300"
               />
             </div>
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="bg-white border-gray-300">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map(cat => (
-                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-wrap gap-2">
+              {categories.map(cat => (
+                <Button
+                  key={cat}
+                  type="button"
+                  variant={selectedCategory === cat ? 'default' : 'outline'}
+                  size="sm"
+                  className={selectedCategory === cat ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white'}
+                  onClick={() => setSelectedCategory(cat)}
+                >
+                  {cat}
+                </Button>
+              ))}
+            </div>
           </div>
 
           {!readOnly && (
@@ -300,21 +344,21 @@ export function ProductsPageEnhanced({
                 {/* Basic Info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium text-gray-600">Product Name *</label>
+                    <label className="text-sm font-medium text-gray-600">Specific Product Name</label>
                     <Input
                       value={formData.name || ''}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       className="bg-white border-gray-300"
-                      required
+                      placeholder={buildSpecificProductName(formData) || 'Auto-built from brand, product, size'}
                     />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-600">SKU *</label>
+                    <label className="text-sm font-medium text-gray-600">SKU / Barcode *</label>
                     <Input
                       value={formData.sku || ''}
                       onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                       className="bg-white border-gray-300"
-                      placeholder="e.g., BVRY-001"
+                      placeholder="Scan or enter barcode"
                       required
                     />
                   </div>
@@ -327,6 +371,7 @@ export function ProductsPageEnhanced({
                       value={formData.category || ''}
                       onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                       className="bg-white border-gray-300"
+                      placeholder="Type category name"
                       required
                     />
                   </div>
@@ -342,6 +387,59 @@ export function ProductsPageEnhanced({
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Brand *</label>
+                    <Input
+                      value={formData.brand || ''}
+                      onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                      className="bg-white border-gray-300"
+                      placeholder="e.g., Brookside, Samsung, Ajab"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Generic Product *</label>
+                    <Input
+                      value={formData.parentProduct || ''}
+                      onChange={(e) => setFormData({ ...formData, parentProduct: e.target.value })}
+                      className="bg-white border-gray-300"
+                      placeholder="e.g., Milk, Sugar, Laptop"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Variant</label>
+                    <Input
+                      value={formData.variation || ''}
+                      onChange={(e) => setFormData({ ...formData, variation: e.target.value })}
+                      className="bg-white border-gray-300"
+                      placeholder="e.g., Whole milk, Brown, Core i5"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Pack / Size</label>
+                    <Input
+                      value={formData.packSize || ''}
+                      onChange={(e) => setFormData({ ...formData, packSize: e.target.value })}
+                      className="bg-white border-gray-300"
+                      placeholder="e.g., 500ml, 2kg, 14 inch"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-600">Model / Code</label>
+                    <Input
+                      value={formData.modelNumber || ''}
+                      onChange={(e) => setFormData({ ...formData, modelNumber: e.target.value })}
+                      className="bg-white border-gray-300"
+                      placeholder="e.g., A15, SM-A155"
+                    />
                   </div>
                 </div>
 
@@ -552,6 +650,8 @@ export function ProductsPageEnhanced({
                   <TableHead>SKU</TableHead>
                   <TableHead>Product Name</TableHead>
                   <TableHead>Category</TableHead>
+                  <TableHead>Brand</TableHead>
+                  <TableHead>Variation</TableHead>
                   <TableHead>UOM</TableHead>
                   <TableHead>Buy Price</TableHead>
                   <TableHead>Retail Price</TableHead>
@@ -575,6 +675,13 @@ export function ProductsPageEnhanced({
                     </TableCell>
                     <TableCell className="font-medium text-gray-900">{product.name}</TableCell>
                     <TableCell>{product.category}</TableCell>
+                    <TableCell>{product.brand || '-'}</TableCell>
+                    <TableCell>
+                      <div className="text-sm text-gray-900">{product.variation || '-'}</div>
+                      {product.parentProduct && <div className="text-xs text-gray-500">Generic: {product.parentProduct}</div>}
+                      {product.packSize && <div className="text-xs text-gray-500">Pack: {product.packSize}</div>}
+                      {product.modelNumber && <div className="text-xs text-gray-500">Model: {product.modelNumber}</div>}
+                    </TableCell>
                     <TableCell className="text-center">{product.uom.toUpperCase()}</TableCell>
                     <TableCell>KSh {product.buyingPrice.toFixed(2)}</TableCell>
                     <TableCell>KSh {product.prices.retail.toFixed(2)}</TableCell>

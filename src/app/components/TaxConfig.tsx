@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Badge } from './ui/badge';
 import { Plus, Edit, Trash2, Percent } from 'lucide-react';
+import { toast } from 'sonner';
 
 export interface TaxConfiguration {
   id: string;
@@ -53,7 +54,7 @@ export function TaxConfig({ onSave }: TaxConfigProps) {
     e.preventDefault();
     
     if (!formData.name || formData.percentage < 0 || formData.percentage > 100) {
-      alert('Please fill all fields correctly');
+      toast.error('Please fill all fields correctly');
       return;
     }
 
@@ -97,7 +98,7 @@ export function TaxConfig({ onSave }: TaxConfigProps) {
 
   const handleSave = () => {
     onSave?.(taxes);
-    alert('Tax configurations saved!');
+    toast.success('Tax configurations saved');
   };
 
   return (

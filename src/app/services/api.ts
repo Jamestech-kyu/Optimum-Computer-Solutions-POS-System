@@ -24,18 +24,34 @@ interface BackendProduct {
   id: number;
   sku: string;
   name: string;
+  description?: string;
+  generic_name?: string | null;
+  brand?: string | null;
+  variant?: string | null;
+  pack_size?: string | null;
+  model_number?: string | null;
   category_name: string | null;
   base_unit_name?: string | null;
   unit?: string | null;
   price: string | number;
   retail_price?: string | number;
   wholesale_price: string | number | null;
+  carton_price?: string | number | null;
   quantity: number;
   stock_quantity?: string | number;
   image_url?: string;
   image_data?: string;
   main_image?: string;
   external_image_url?: string;
+  minimum_stock?: string | number | null;
+  reorder_level?: string | number | null;
+  supplier_id?: number | null;
+  supplier?: number | { id?: number; name?: string } | null;
+  supplier_name?: string | null;
+  supplier_sku?: string | null;
+  notes?: string | null;
+  tax_rate?: string | number | null;
+  maximum_stock?: string | number | null;
 }
 
 interface BackendSaleItem {
@@ -51,11 +67,22 @@ interface BackendSaleItem {
   total?: string | number;
 }
 
+interface BackendPayment {
+  payment_method: string;
+  amount: string | number;
+}
+
 interface BackendSale {
   id: number;
+  customer?: number | null;
   receipt_number: string;
   sale_id?: string;
   customer_name: string;
+  customer_phone?: string;
+  customer_email?: string;
+  customer_account_reference?: string;
+  cashier_name?: string;
+  cashier?: string | number;
   grand_total: string | number;
   total?: string | number;
   amount_paid: string | number;
@@ -63,6 +90,7 @@ interface BackendSale {
   created_at: string;
   sale_date?: string;
   items: BackendSaleItem[];
+  payments?: BackendPayment[];
 }
 
 interface BackendSupplierInvoice {
@@ -70,15 +98,27 @@ interface BackendSupplierInvoice {
   supplier_id?: number | null;
   supplier?: number | null;
   supplier_name: string;
-  contact: string;
-  invoice_number: string;
+  contact?: string;
+  invoice_number?: string;
   po_number?: string;
-  order_date: string;
+  order_date?: string;
+  created_at?: string;
   amount: string | number;
   total?: string | number;
-  status: SupplierOrderInvoice['status'];
-  items: number | unknown[];
-  payment_method: string;
+  status: SupplierOrderInvoice['status'] | 'draft' | 'submitted' | 'confirmed' | 'shipped' | 'received' | 'completed' | 'cancelled' | 'returned';
+  delivery_note?: string;
+  tracking_number?: string;
+  items: number | Array<{
+    id?: number;
+    product?: number;
+    product_id?: number;
+    product_name?: string;
+    quantity?: string | number;
+    quantity_received?: string | number;
+    unit_cost?: string | number;
+    total?: string | number;
+  }>;
+  payment_method?: string;
   payment_status?: string;
 }
 
@@ -114,19 +154,52 @@ export interface BackendUser {
   access_tier: string;
   two_factor_enabled: boolean;
   is_active: boolean;
+  approval_status?: 'pending' | 'approved' | 'rejected' | 'expired';
+  approval_requested_at?: string | null;
+  approval_deadline_at?: string | null;
+  approved_at?: string | null;
+  rejected_at?: string | null;
+  approval_notes?: string;
   last_login?: string | null;
 }
 
 export interface BackendSupplier {
   id: number;
   name: string;
+  code?: string;
   contact_person?: string;
+  designation?: string;
   phone?: string;
+  alternate_phone?: string;
+  fax_number?: string;
   email?: string;
+  website?: string;
+  supplier_type?: string;
+  supplier_category?: string;
+  registration_number?: string;
   address?: string;
   address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  county?: string;
+  postal_code?: string;
+  country?: string;
+  tax_number?: string;
+  bank_name?: string;
+  bank_account?: string;
+  currency?: string;
+  credit_limit?: string | number;
+  preferred_payment_method?: string;
+  mpesa_paybill?: string;
+  mpesa_till?: string;
+  default_warehouse?: string;
+  minimum_order_amount?: string | number;
+  lead_time_days?: number;
+  uploaded_documents?: Array<{ name: string; size: string }>;
   notes?: string;
   is_active?: boolean;
+  is_preferred?: boolean;
+  payment_terms?: number;
 }
 
 export interface BackendCustomer {
@@ -214,7 +287,7 @@ export interface LoginResult {
   userRole?: string;
 }
 
-export type RegistrationRole = 'admin' | 'accountant' | 'cashier' | 'storekeeper' | 'manager';
+export type RegistrationRole = 'accountant' | 'cashier' | 'storekeeper' | 'inventory_clerk' | 'manager' | 'viewer';
 export type BackendRole = 'super_admin' | 'admin' | 'manager' | 'accountant' | 'cashier' | 'inventory_clerk' | 'viewer' | 'storekeeper';
 
 export interface RegisterAccountInput {
@@ -226,11 +299,40 @@ export interface RegisterAccountInput {
 
 export interface CreateSupplierInput {
   name: string;
+  code?: string;
   contact_person?: string;
+  designation?: string;
   phone?: string;
+  alternate_phone?: string;
+  fax_number?: string;
   email?: string;
+  website?: string;
+  supplier_type?: string;
+  supplier_category?: string;
+  registration_number?: string;
   address?: string;
+  address_line1?: string;
+  address_line2?: string;
+  city?: string;
+  county?: string;
+  postal_code?: string;
+  country?: string;
+  tax_number?: string;
+  bank_name?: string;
+  bank_account?: string;
+  currency?: string;
+  credit_limit?: number;
+  preferred_payment_method?: string;
+  mpesa_paybill?: string;
+  mpesa_till?: string;
+  default_warehouse?: string;
+  minimum_order_amount?: number;
+  lead_time_days?: number;
+  uploaded_documents?: Array<{ name: string; size: string }>;
   notes?: string;
+  is_active?: boolean;
+  is_preferred?: boolean;
+  payment_terms?: number;
 }
 
 export type CreateCustomerInput = Pick<BackendCustomer,
@@ -269,13 +371,26 @@ export interface CreateProductInput {
   name: string;
   sku: string;
   category_name?: string;
+  generic_name?: string;
+  brand?: string;
+  parent_product?: string;
+  variation?: string;
+  pack_size?: string;
+  model_number?: string;
+  supplier_id?: number;
   base_unit_name?: string;
   price: number;
   wholesale_price?: number;
+  corporate_price?: number;
+  loyalty_price?: number;
   cost_price?: number;
   quantity?: number;
   minimum_stock?: number;
+  maximum_stock?: number;
+  supplier_sku?: string;
+  tax_rate?: number;
   image_data?: string;
+  notes?: string;
 }
 
 export interface UpdateUserInput {
@@ -306,6 +421,22 @@ const requestListOrEmpty = async <T>(path: string): Promise<T[]> => {
 };
 
 const toNumber = (value: string | number | null | undefined) => Number(value ?? 0);
+
+const readMetadataValue = (text: string | null | undefined, label: string) => {
+  const match = (text || '').match(new RegExp(`${label}:\\s*([^|\\n]+)`, 'i'));
+  return match?.[1]?.trim() || undefined;
+};
+
+const buildProductMetadata = (product: CreateProductInput) => [
+  product.brand ? `Brand: ${product.brand}` : '',
+  (product.generic_name || product.parent_product) ? `Parent Product: ${product.generic_name || product.parent_product}` : '',
+  product.variation ? `Variation: ${product.variation}` : '',
+  product.pack_size ? `Pack Size: ${product.pack_size}` : '',
+  product.model_number ? `Model: ${product.model_number}` : '',
+  typeof product.corporate_price === 'number' ? `Corporate Price: ${product.corporate_price}` : '',
+  typeof product.loyalty_price === 'number' ? `Loyalty Price: ${product.loyalty_price}` : '',
+  product.notes ? `Notes: ${product.notes}` : ''
+].filter(Boolean).join(' | ');
 
 const hashText = (text: string) => Array.from(text).reduce((hash, character) => {
   return ((hash << 5) - hash + character.charCodeAt(0)) >>> 0;
@@ -339,15 +470,23 @@ const mapProductFromApi = (product: BackendProduct): POSProduct => ({
   name: product.name,
   sku: product.sku,
   category: product.category_name || 'Uncategorized',
+  brand: product.brand || readMetadataValue(product.notes, 'Brand') || readMetadataValue(product.description, 'Brand') || product.supplier_sku || undefined,
+  parentProduct: product.generic_name || readMetadataValue(product.notes, 'Parent Product') || readMetadataValue(product.description, 'Parent Product'),
+  variation: product.variant || readMetadataValue(product.notes, 'Variation') || readMetadataValue(product.description, 'Variation'),
+  packSize: product.pack_size || readMetadataValue(product.notes, 'Pack Size') || readMetadataValue(product.description, 'Pack Size'),
+  modelNumber: product.model_number || readMetadataValue(product.notes, 'Model') || readMetadataValue(product.description, 'Model'),
   uom: product.base_unit_name || product.unit || 'piece',
   prices: {
     retail: toNumber(product.retail_price ?? product.price),
     wholesale: toNumber(product.wholesale_price || product.retail_price || product.price),
-    corporate: toNumber(product.wholesale_price || product.retail_price || product.price),
-    loyal: toNumber(product.retail_price ?? product.price)
+    corporate: toNumber(readMetadataValue(product.notes, 'Corporate Price') || product.carton_price || product.wholesale_price || product.retail_price || product.price),
+    loyal: toNumber(readMetadataValue(product.notes, 'Loyalty Price') || product.retail_price || product.price)
   },
   stock: toNumber(product.stock_quantity ?? product.quantity),
-  tax: 0,
+  reorderLevel: toNumber(product.minimum_stock ?? product.reorder_level),
+  supplierId: typeof product.supplier === 'object' ? product.supplier?.id : product.supplier_id ?? product.supplier ?? undefined,
+  supplierName: typeof product.supplier === 'object' ? product.supplier?.name : product.supplier_name || undefined,
+  tax: toNumber(product.tax_rate),
   image: absoluteMediaUrl(product.image_data || product.image_url || product.external_image_url || product.main_image) || productPhotoFor(product)
 });
 
@@ -371,35 +510,105 @@ const toBackendUnit = (unit?: string) => {
   return unitMap[(unit || '').toLowerCase()] || 'piece';
 };
 
-const mapSaleFromApi = (sale: BackendSale): CompletedSale => ({
-  id: sale.receipt_number || sale.sale_id || String(sale.id),
-  customer: sale.customer_name || 'Walk-in Customer',
-  amount: toNumber(sale.grand_total ?? sale.total),
-  cashAmount: sale.payment_method === 'cash' ? toNumber(sale.amount_paid) : 0,
-  method: sale.payment_method,
-  timestamp: new Date(sale.created_at || sale.sale_date || Date.now()),
-  cashier: 'Cashier',
-  items: (sale.items || []).map(item => ({
-    productId: String(item.product_id ?? item.product),
-    name: item.name || item.product_name || 'Product',
-    quantity: toNumber(item.quantity),
-    stockUnits: toNumber(item.base_quantity || 1),
-    price: toNumber(item.price ?? item.unit_price),
-    total: toNumber(item.line_total ?? item.total)
-  }))
-});
+const paymentMethodName = (method?: string) => {
+  const methodMap: Record<string, string> = {
+    cash: 'Cash',
+    mpesa: 'M-Pesa',
+    card: 'Card',
+    bank_transfer: 'Bank Transfer',
+    loyalty: 'Loyalty',
+    mixed: 'Mixed Payment'
+  };
 
-const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrderInvoice => ({
-  id: invoice.invoice_number || invoice.po_number || `SUP-INV-${invoice.id.toString().padStart(3, '0')}`,
-  supplierId: invoice.supplier_id || invoice.supplier || invoice.id,
-  supplierName: invoice.supplier_name,
-  contact: invoice.contact || '',
-  date: invoice.order_date,
-  amount: toNumber(invoice.amount ?? invoice.total),
-  status: invoice.status,
-  items: Array.isArray(invoice.items) ? invoice.items.length : invoice.items,
-  paymentMethod: invoice.payment_method || invoice.payment_status || 'pending'
-});
+  return methodMap[method || ''] || method || 'Paid';
+};
+
+const buildSalePaymentLabel = (sale: BackendSale) => {
+  if (sale.payments && sale.payments.length > 0) {
+    return sale.payments
+      .map(payment => `${paymentMethodName(payment.payment_method)}: ${toNumber(payment.amount).toFixed(2)}`)
+      .join(', ');
+  }
+
+  return `${paymentMethodName(sale.payment_method)}: ${toNumber(sale.amount_paid ?? sale.grand_total ?? sale.total).toFixed(2)}`;
+};
+
+const mapSaleFromApi = (sale: BackendSale): CompletedSale => {
+  const method = buildSalePaymentLabel(sale);
+
+  return {
+    id: sale.receipt_number || sale.sale_id || String(sale.id),
+    customer: sale.customer_name || 'Walk-in Customer',
+    customerId: sale.customer ?? undefined,
+    customerPhone: sale.customer_phone,
+    customerEmail: sale.customer_email,
+    customerAccountReference: sale.customer_account_reference,
+    amount: toNumber(sale.grand_total ?? sale.total),
+    cashAmount: sale.payments && sale.payments.length > 0
+      ? sale.payments
+          .filter(payment => payment.payment_method === 'cash')
+          .reduce((sum, payment) => sum + toNumber(payment.amount), 0)
+      : sale.payment_method === 'cash' ? toNumber(sale.amount_paid) : 0,
+    method,
+    timestamp: new Date(sale.created_at || sale.sale_date || Date.now()),
+    cashier: sale.cashier_name || (typeof sale.cashier === 'string' ? sale.cashier : undefined) || 'Cashier',
+    items: (sale.items || []).map(item => ({
+      productId: String(item.product_id ?? item.product),
+      name: item.name || item.product_name || 'Product',
+      quantity: toNumber(item.quantity),
+      stockUnits: toNumber(item.base_quantity || 1),
+      price: toNumber(item.price ?? item.unit_price),
+      total: toNumber(item.line_total ?? item.total)
+    }))
+  };
+};
+
+const mapPurchaseOrderStatus = (status: BackendSupplierInvoice['status']): SupplierOrderInvoice['status'] => {
+  if (status === 'received' || status === 'completed') return 'delivered';
+  if (status === 'draft' || status === 'submitted' || status === 'confirmed' || status === 'shipped') return 'requested';
+  return status === 'delivered' || status === 'pending' || status === 'requested' ? status : 'pending';
+};
+
+const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrderInvoice => {
+  const firstItem = Array.isArray(invoice.items) ? invoice.items[0] : undefined;
+  const itemQuantity = toNumber(firstItem?.quantity);
+  const orderItems = Array.isArray(invoice.items)
+    ? invoice.items.map(item => {
+        const requestedQuantity = toNumber(item.quantity);
+        const deliveredQuantity = toNumber(item.quantity_received);
+        return {
+          productId: String(item.product_id ?? item.product ?? ''),
+          productName: item.product_name || 'Product',
+          requestedQuantity,
+          deliveredQuantity,
+          pendingQuantity: Math.max(0, requestedQuantity - deliveredQuantity),
+          unitCost: toNumber(item.unit_cost)
+        };
+      })
+    : [];
+  const requestedQuantity = orderItems.reduce((sum, item) => sum + item.requestedQuantity, 0) || itemQuantity;
+  const deliveredQuantity = orderItems.reduce((sum, item) => sum + item.deliveredQuantity, 0);
+
+  return {
+    id: invoice.invoice_number || invoice.po_number || `SUP-INV-${invoice.id.toString().padStart(3, '0')}`,
+    supplierId: invoice.supplier_id || invoice.supplier || invoice.id,
+    supplierName: invoice.supplier_name,
+    contact: invoice.contact || '',
+    date: (invoice.order_date || invoice.created_at || new Date().toISOString()).slice(0, 10),
+    amount: toNumber(invoice.amount ?? invoice.total),
+    status: mapPurchaseOrderStatus(invoice.status),
+    items: Array.isArray(invoice.items) ? invoice.items.length : invoice.items,
+    paymentMethod: invoice.payment_method || invoice.payment_status || 'pending',
+    deliveryNote: invoice.delivery_note || invoice.tracking_number || undefined,
+    goodsReceivingNote: invoice.tracking_number || undefined,
+    orderItems,
+    productId: firstItem ? String(firstItem.product_id ?? firstItem.product ?? '') || undefined : undefined,
+    productName: firstItem?.product_name,
+    quantityRequested: requestedQuantity || undefined,
+    quantityDelivered: deliveredQuantity || undefined,
+    quantityPending: Math.max(0, requestedQuantity - deliveredQuantity) || undefined
+  };
+};
 
 const mapNotificationFromApi = (notification: BackendNotification): BackendNotification => {
   const severityByPriority: Record<string, BackendNotification['severity']> = {
@@ -466,10 +675,7 @@ const storeTokens = (response: LoginResponse) => {
 
 const normalizeAccountRole = (role?: RegistrationRole | BackendRole) => {
   const roleMap: Record<string, string> = {
-    inventory_clerk: 'storekeeper',
-    viewer: 'cashier',
-    super_admin: 'admin',
-    accountant: 'manager'
+    inventory_clerk: 'storekeeper'
   };
 
   return role ? roleMap[role] || role : role;
@@ -633,11 +839,43 @@ export const logout = () => {
 
 export const hasStoredSession = () => Boolean(getAccessToken());
 
+const normalizeSalePaymentMethod = (method: string) => {
+  const normalized = method.toLowerCase().replace(/[\s-]+/g, '_');
+  if (normalized.includes('m_pesa') || normalized.includes('mpesa')) return 'mpesa';
+  if (normalized.includes('card')) return 'card';
+  if (normalized.includes('bank')) return 'bank_transfer';
+  if (normalized.includes('loyalty')) return 'loyalty';
+  if (normalized.includes('mixed')) return 'mixed';
+  return 'cash';
+};
+
+const buildSalePaymentInputs = (sale: CompletedSale) => {
+  const paymentParts = (sale.method || '').split(',').map(part => part.trim()).filter(Boolean);
+  const parsedPayments = paymentParts.map(part => {
+    const [methodLabel, ...amountParts] = part.split(':');
+    const amount = Number(amountParts.join(':').replace(/[^\d.-]/g, ''));
+
+    return {
+      payment_method: normalizeSalePaymentMethod(methodLabel || sale.method),
+      amount: Number.isFinite(amount) && amount > 0 ? amount : 0,
+      reference_number: sale.id
+    };
+  }).filter(payment => payment.amount > 0);
+
+  if (parsedPayments.length > 0) return parsedPayments;
+
+  return [{
+    payment_method: sale.cashAmount > 0 ? 'cash' : normalizeSalePaymentMethod(sale.method || 'cash'),
+    amount: sale.cashAmount > 0 ? sale.cashAmount : sale.amount,
+    reference_number: sale.id
+  }];
+};
+
 export const loadBackendState = async (fallbackDayBalance: DayBalance): Promise<AppBackendState> => {
   const [products, completedSales, supplierOrders, suppliers, customers, users] = await Promise.all([
     requestListOrEmpty<BackendProduct>('/products/'),
     requestListOrEmpty<BackendSale>('/sales/'),
-    requestListOrEmpty<BackendSupplierInvoice>('/supplier-orders/'),
+    requestListOrEmpty<BackendSupplierInvoice>('/inventory/purchase-orders/'),
     requestListOrEmpty<BackendSupplier>('/products/suppliers/'),
     requestListOrEmpty<BackendCustomer>('/customers/'),
     requestListOrEmpty<BackendUser>('/users/')
@@ -660,9 +898,10 @@ export const saveSale = async (sale: CompletedSale) => {
   const createdSale = await request<BackendSale>('/sales/', {
     method: 'POST',
     body: JSON.stringify({
-      customer_name: sale.customer,
+      customer: sale.customerId || null,
       discount: 0,
       discount_percentage: 0,
+      payment_inputs: buildSalePaymentInputs(sale),
       cart_items: sale.items.map(item => ({
         product_id: Number(item.productId),
         quantity: item.quantity
@@ -676,7 +915,7 @@ export const saveSale = async (sale: CompletedSale) => {
 export const updateProductStock = async (productId: string, stock: number) => {
   const response = await request<BackendProduct>(`/products/${productId}/`, {
     method: 'PATCH',
-    body: JSON.stringify({ stock_quantity: stock })
+    body: JSON.stringify({ stock_quantity: stock, quantity: stock })
   });
 
   return mapProductFromApi(response);
@@ -695,22 +934,43 @@ export const deactivateUser = (userId: number) => request<{ message: string }>(`
   body: JSON.stringify({})
 });
 
+export const approveUser = (userId: number) => request<BackendUser>(`/users/${userId}/approve/`, {
+  method: 'POST',
+  body: JSON.stringify({})
+});
+
+export const rejectUser = (userId: number, notes = '') => request<BackendUser>(`/users/${userId}/reject/`, {
+  method: 'POST',
+  body: JSON.stringify({ notes })
+});
+
 export const createProduct = async (product: CreateProductInput) => {
+  const metadata = buildProductMetadata(product);
   const response = await request<BackendProduct>('/products/', {
     method: 'POST',
     body: JSON.stringify({
       name: product.name,
       barcode: product.sku,
-      description: '',
+      generic_name: product.generic_name || product.parent_product || '',
+      brand: product.brand || '',
+      variant: product.variation || '',
+      pack_size: product.pack_size || '',
+      model_number: product.model_number || '',
+      description: product.notes || metadata,
       retail_price: product.price,
-      wholesale_price: product.wholesale_price,
+      wholesale_price: product.wholesale_price || null,
+      carton_price: product.corporate_price || null,
       cost_price: product.cost_price || 0,
       stock_quantity: product.quantity || 0,
       minimum_stock: product.minimum_stock || 0,
       reorder_level: product.minimum_stock || 0,
+      maximum_stock: product.maximum_stock || null,
       category_name_input: product.category_name,
+      supplier: product.supplier_id || null,
+      supplier_sku: product.supplier_sku || '',
+      notes: metadata,
       unit: toBackendUnit(product.base_unit_name),
-      tax_rate: 16,
+      tax_rate: product.tax_rate ?? 0,
       is_active: true,
       image_data: product.image_data || ''
     })
@@ -748,21 +1008,68 @@ export const createCustomer = (customer: CreateCustomerInput) => request<Backend
 });
 
 export const saveSupplierInvoice = async (invoice: SupplierOrderInvoice) => {
-  const response = await request<BackendSupplierInvoice>('/supplier-orders/', {
+  const invoiceItems = invoice.orderItems && invoice.orderItems.length > 0
+    ? invoice.orderItems
+    : invoice.productId ? [{
+        productId: invoice.productId,
+        productName: invoice.productName || 'Product',
+        requestedQuantity: invoice.quantityRequested || invoice.quantityDelivered || invoice.items || 1,
+        deliveredQuantity: invoice.quantityDelivered || 0,
+        pendingQuantity: Math.max(0, (invoice.quantityRequested || invoice.quantityDelivered || invoice.items || 1) - (invoice.quantityDelivered || 0)),
+        unitCost: invoice.quantityDelivered ? invoice.amount / invoice.quantityDelivered : invoice.amount
+      }] : [];
+
+  const orderItems = invoiceItems.map(item => ({
+    product_id: Number(item.productId),
+    quantity: item.requestedQuantity,
+    unit_cost: item.unitCost || (item.requestedQuantity ? invoice.amount / item.requestedQuantity : invoice.amount),
+    notes: item.productName ? `Reorder for ${item.productName}` : 'Supplier reorder'
+  }));
+
+  const response = await request<BackendSupplierInvoice>('/inventory/purchase-orders/', {
     method: 'POST',
     body: JSON.stringify({
-      supplier_name: invoice.supplierName,
-      contact: invoice.contact,
-      invoice_number: String(invoice.id).startsWith('SUP-INV-') ? '' : String(invoice.id),
-      order_date: invoice.date,
-      amount: invoice.amount,
-      status: invoice.status,
-      items: invoice.items,
-      payment_method: invoice.paymentMethod || 'Credit'
+      supplier: invoice.supplierId,
+      status: invoice.status === 'delivered' ? 'confirmed' : invoice.status === 'requested' ? 'submitted' : 'draft',
+      payment_status: 'unpaid',
+      tracking_number: invoice.goodsReceivingNote || invoice.deliveryNote || '',
+      supplier_notes: invoice.contact || '',
+      internal_notes: [
+        invoice.productName ? `Created from POS procurement for ${invoice.productName}` : 'Created from POS procurement',
+        invoice.deliveryNote ? `Delivery note: ${invoice.deliveryNote}` : ''
+      ].filter(Boolean).join('\n'),
+      order_items: orderItems
     })
   });
 
-  return mapSupplierInvoiceFromApi(response);
+  if (invoice.status !== 'delivered') {
+    return mapSupplierInvoiceFromApi(response);
+  }
+
+  const createdItems = Array.isArray(response.items) ? response.items : [];
+  const receivePayload = createdItems
+    .map(createdItem => {
+      const matchingItem = invoiceItems.find(item => String(item.productId) === String(createdItem.product_id ?? createdItem.product));
+      const quantity = matchingItem?.deliveredQuantity || 0;
+      return quantity > 0 ? {
+        item_id: createdItem.id,
+        quantity,
+        location: 'Main Store',
+        notes: invoice.goodsReceivingNote || invoice.deliveryNote || 'Goods received'
+      } : null;
+    })
+    .filter(Boolean);
+
+  if (receivePayload.length === 0) {
+    return mapSupplierInvoiceFromApi(response);
+  }
+
+  const receiveResponse = await request<{ purchase_order: BackendSupplierInvoice }>(`/inventory/purchase-orders/${response.id}/receive/`, {
+    method: 'POST',
+    body: JSON.stringify(receivePayload)
+  });
+
+  return mapSupplierInvoiceFromApi(receiveResponse.purchase_order);
 };
 
 export const loadAppSettings = async () => {
@@ -776,9 +1083,10 @@ export const saveBackendAppSettings = async (settings: AppSettings) => {
 };
 
 export const loadNotifications = async (unreadOnly = true) => {
-  const query = unreadOnly ? '?status=pending&ordering=-created_at' : '?ordering=-created_at';
+  const query = '?ordering=-created_at';
   const response = await request<BackendNotification[] | PaginatedResponse<BackendNotification>>(`/notifications/notifications/${query}`);
-  return unwrapList(response).map(mapNotificationFromApi);
+  const notifications = unwrapList(response).map(mapNotificationFromApi);
+  return unreadOnly ? notifications.filter(notification => !notification.is_read) : notifications;
 };
 
 export const markNotificationRead = (notificationId: number) => request<{ success: boolean }>(`/notifications/notifications/${notificationId}/mark-read/`, {

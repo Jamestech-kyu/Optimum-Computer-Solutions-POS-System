@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { formatCurrency } from './utils/helpers';
 import { getMpesaPaymentStatus, initiateMpesaPayment, type MpesaPaymentStatus } from '../services/api';
 import { useAppLanguage } from '../services/language';
+import { toast } from 'sonner';
 
 export type PaymentMethod = 'cash' | 'card' | 'mpesa' | 'check' | 'bank_transfer';
 
@@ -59,11 +60,13 @@ export function MultiPaymentHandler({ totalAmount, customerName = 'Walk-in Custo
 
   const addPayment = async () => {
     if (!currentAmount || currentAmountNumber <= 0) {
-      alert('Please enter a valid amount');
+      toast.error('Enter a valid amount');
       return;
     }
     if (currentAmountNumber > remaining) {
-      alert(`Amount cannot exceed remaining: ${formatCurrency(remaining)}`);
+      toast.warning('Amount is too high', {
+        description: `Amount cannot exceed remaining: ${formatCurrency(remaining)}.`
+      });
       return;
     }
 
@@ -71,7 +74,9 @@ export function MultiPaymentHandler({ totalAmount, customerName = 'Walk-in Custo
 
     if (currentMethod === 'mpesa') {
       if (!mpesaPhone.trim()) {
-        alert('Enter the customer M-Pesa phone number.');
+        toast.error('M-Pesa phone required', {
+          description: 'Enter the customer M-Pesa phone number.'
+        });
         return;
       }
 
@@ -128,7 +133,9 @@ export function MultiPaymentHandler({ totalAmount, customerName = 'Walk-in Custo
 
         paymentReference = `${mpesaPhone.trim()} - ${customerName}`;
       } catch (error) {
-        alert(error instanceof Error ? error.message : 'M-Pesa prompt could not be sent.');
+        toast.error('M-Pesa prompt failed', {
+          description: error instanceof Error ? error.message : 'M-Pesa prompt could not be sent.'
+        });
         setIsSendingMpesaPrompt(false);
         return;
       } finally {
@@ -167,7 +174,7 @@ export function MultiPaymentHandler({ totalAmount, customerName = 'Walk-in Custo
 
   const completePayment = () => {
     if (!isComplete) {
-      alert(t('Please complete your payment'));
+      toast.warning(t('Please complete your payment'));
       return;
     }
 

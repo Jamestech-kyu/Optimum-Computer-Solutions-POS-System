@@ -5,7 +5,7 @@ import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { Search, ShoppingCart, Plus, Minus, Trash2, CircleDollarSign, CreditCard, ScanBarcode } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, CircleDollarSign, CreditCard, ScanBarcode } from 'lucide-react';
 import { CashDrawer } from '../CashDrawer';
 import { TransactionNotification } from '../TransactionNotification';
 import { MultiPaymentHandler } from '../MultiPaymentHandler';
@@ -15,6 +15,8 @@ import type { PaymentTransaction } from '../MultiPaymentHandler';
 import { formatCurrency } from '../utils/helpers';
 import { getStoredAppSettings } from '../../services/settings';
 import { useAppLanguage } from '../../services/language';
+import type { BackendCustomer } from '../../services/api';
+import { toast } from 'sonner';
 
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
 
@@ -32,21 +34,22 @@ export interface POSProduct {
   name: string;
   sku: string;
   category: string;
+  brand?: string;
+  parentProduct?: string;
+  variation?: string;
+  packSize?: string;
+  modelNumber?: string;
   uom: string;
   prices: Record<PricingTier, number>;
   stock: number;
+  reorderLevel?: number;
+  supplierId?: number;
+  supplierName?: string;
   tax: number;
   image: string;
 }
 
 export const initialProducts: POSProduct[] = [];
-
-const customers = [
-  { id: '1', name: 'Retail Customer', type: 'retail' },
-  { id: '2', name: 'Wholesale Customer', type: 'wholesale' },
-  { id: '3', name: 'Corporate Customer', type: 'corporate' },
-  { id: '4', name: 'Loyal Customer', type: 'loyal' }
-];
 
 interface CartItem {
   id: string;
@@ -59,6 +62,7 @@ interface CartItem {
   quantity: number;
   tax: number;
   pricingTier: PricingTier;
+  subItemId: string;
 }
 
 export interface CompletedSaleItem {
@@ -73,6 +77,10 @@ export interface CompletedSaleItem {
 export interface CompletedSale {
   id: string;
   customer: string;
+  customerId?: number;
+  customerPhone?: string;
+  customerEmail?: string;
+  customerAccountReference?: string;
   amount: number;
   cashAmount: number;
   method: string;
@@ -91,7 +99,9 @@ export interface DayBalance {
 
 interface POSPageProps {
   products: POSProduct[];
+  customers: BackendCustomer[];
   dayBalance: DayBalance;
+  cashierName: string;
   onTransactionComplete: (sale: CompletedSale) => void;
   onOpenDay: (openingBalance: number) => void;
   onCloseDay: (closingBalance: number) => void;
@@ -100,7 +110,9 @@ interface POSPageProps {
 
 export function POSPage({
   products,
+  customers,
   dayBalance,
+  cashierName,
   onTransactionComplete,
   onOpenDay,
   onCloseDay,
@@ -112,7 +124,7 @@ export function POSPage({
   const [scannerCode, setScannerCode] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState('1');
+  const [selectedCustomer, setSelectedCustomer] = useState('walk-in');
   const [discount, setDiscount] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -120,6 +132,7 @@ export function POSPage({
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState({ 
     id: '', 
+    customer: 'Walk-in Customer',
     amount: 0, 
     method: '',
     timestamp: new Date(),
@@ -132,8 +145,19 @@ export function POSPage({
   const appSettings = getStoredAppSettings();
   const isScannerEnabled = appSettings.posSettings.scannerEnabled;
 
-  const selectedCustomerData = customers.find(c => c.id === selectedCustomer);
-  const customerType = (selectedCustomerData?.type || 'retail') as PricingTier;
+  const activeCustomers = customers.filter(customer => customer.is_active && !customer.is_blacklisted);
+  const customerOptions = [
+    { id: 'walk-in', name: 'Walk-in Customer', type: 'retail' as PricingTier },
+    ...activeCustomers.map(customer => ({
+      id: String(customer.id),
+      name: customer.name,
+      type: (customer.pricing_tier === 'wholesale' ? 'wholesale' : customer.pricing_tier === 'vip' ? 'loyal' : 'retail') as PricingTier,
+      customer
+    }))
+  ];
+  const selectedCustomerData = customerOptions.find(c => c.id === selectedCustomer) || customerOptions[0];
+  const selectedBackendCustomer = 'customer' in selectedCustomerData ? selectedCustomerData.customer : undefined;
+  const customerType = selectedCustomerData.type;
 
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -171,14 +195,16 @@ export function POSPage({
 
   const addToCart = (product: POSProduct, subItem = getProductSubItems(product)[0]) => {
     const price = product.prices[customerType] * subItem.priceMultiplier;
-    const cartId = `${product.id}-${subItem.id}`;
+    const cartId = `${product.id}-${subItem.id}-${customerType}`;
     const existingItem = cart.find(item => item.id === cartId);
     const currentReserved = cart
       .filter(item => item.productId === product.id)
       .reduce((sum, item) => sum + (item.stockUnits * item.quantity), 0);
 
     if (currentReserved + subItem.stockUnits > product.stock) {
-      alert(`Only ${product.stock - currentReserved} ${product.uom} left in stock`);
+      toast.warning('Insufficient stock', {
+        description: `Only ${product.stock - currentReserved} ${product.uom} left in stock.`
+      });
       return;
     }
 
@@ -188,20 +214,22 @@ export function POSPage({
           ? { ...item, quantity: item.quantity + 1 }
           : item
       ));
-    } else {
-      setCart([...cart, {
-        id: cartId,
-        productId: product.id,
-        name: `${product.name} - ${subItem.name}`,
-        sku: product.sku,
-        uom: subItem.quantityLabel,
-        stockUnits: subItem.stockUnits,
-        price,
-        quantity: 1,
-        tax: product.tax,
-        pricingTier: customerType
-      }]);
+      return;
     }
+
+    setCart([...cart, {
+      id: cartId,
+      productId: product.id,
+      name: `${product.name} - ${subItem.name}`,
+      sku: product.sku,
+      uom: subItem.quantityLabel,
+      stockUnits: subItem.stockUnits,
+      price,
+      quantity: 1,
+      tax: product.tax,
+      pricingTier: customerType,
+      subItemId: subItem.id
+    }]);
   };
 
   const selectProduct = (product: POSProduct, subItem: ProductSubItem) => {
@@ -223,7 +251,9 @@ export function POSPage({
     );
 
     if (!scannedProduct) {
-      alert(`No product found for barcode/SKU: ${scannerCode}`);
+      toast.error('Product not found', {
+        description: `No product found for barcode/SKU: ${scannerCode}.`
+      });
       return;
     }
 
@@ -232,24 +262,30 @@ export function POSPage({
   };
 
   const updateQuantity = (id: string, quantity: number) => {
-    if (quantity === 0) {
+    if (quantity <= 0) {
       setCart(cart.filter(item => item.id !== id));
-    } else {
-      const targetItem = cart.find(item => item.id === id);
-      const product = targetItem ? products.find(item => item.id === targetItem.productId) : undefined;
-      if (targetItem && product) {
-        const otherReserved = cart
-          .filter(item => item.productId === targetItem.productId && item.id !== id)
-          .reduce((sum, item) => sum + (item.stockUnits * item.quantity), 0);
-        if (otherReserved + (targetItem.stockUnits * quantity) > product.stock) {
-          alert(`Only ${product.stock - otherReserved} ${product.uom} left in stock`);
-          return;
-        }
-      }
-      setCart(cart.map(item =>
-        item.id === id ? { ...item, quantity } : item
-      ));
+      return;
     }
+
+    const targetItem = cart.find(item => item.id === id);
+    const product = targetItem ? products.find(item => item.id === targetItem.productId) : undefined;
+
+    if (targetItem && product) {
+      const otherReserved = cart
+        .filter(item => item.productId === targetItem.productId && item.id !== id)
+        .reduce((sum, item) => sum + (item.stockUnits * item.quantity), 0);
+
+      if (otherReserved + (targetItem.stockUnits * quantity) > product.stock) {
+        toast.warning('Insufficient stock', {
+          description: `Only ${product.stock - otherReserved} ${product.uom} left in stock.`
+        });
+        return;
+      }
+    }
+
+    setCart(cart.map(item =>
+      item.id === id ? { ...item, quantity } : item
+    ));
   };
 
   const removeItem = (id: string) => {
@@ -297,6 +333,7 @@ export function POSPage({
 
     setLastTransaction({
       id: transactionId,
+      customer: selectedCustomerData.name,
       amount: total,
       method: paymentMethodLabel,
       timestamp: new Date(),
@@ -308,13 +345,17 @@ export function POSPage({
 
     onTransactionComplete({
       id: transactionId,
-      customer: selectedCustomerData?.name || 'Walk-in Customer',
+      customer: selectedCustomerData.name,
+      customerId: selectedBackendCustomer?.id,
+      customerPhone: selectedBackendCustomer?.phone,
+      customerEmail: selectedBackendCustomer?.email,
+      customerAccountReference: selectedBackendCustomer?.account_reference,
       amount: total,
       cashAmount,
       method: paymentMethodLabel,
       timestamp: new Date(),
       items: saleItems,
-      cashier: 'John Cashier'
+      cashier: cashierName
     });
 
     setIsNotificationOpen(true);
@@ -327,7 +368,9 @@ export function POSPage({
 
   const handleCashPayment = () => {
     if (!cashTendered || parseFloat(cashTendered) < total) {
-      alert('Insufficient cash');
+      toast.error('Insufficient cash', {
+        description: 'The tendered cash is less than the sale total.'
+      });
       return;
     }
 
@@ -506,7 +549,7 @@ export function POSPage({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {customers.map(c => (
+                  {customerOptions.map(c => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name} • {c.type}
                     </SelectItem>
@@ -516,7 +559,7 @@ export function POSPage({
             </div>
 
             {/* Cart Items */}
-            <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
+            <div className="space-y-2 max-h-[32rem] overflow-y-auto border border-gray-200 rounded-lg p-2">
               {cart.length === 0 ? (
                 <p className="text-gray-500 text-center py-4 text-sm">{t('No items in cart')}</p>
               ) : (
@@ -527,23 +570,14 @@ export function POSPage({
                       <p className="text-gray-500 text-xs">{formatCurrency(item.price)} / {item.uom}</p>
                     </div>
                     <div className="flex items-center gap-1 ml-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="w-6 h-6 p-0"
-                        onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                      >
-                        <Minus className="w-3 h-3" />
-                      </Button>
-                      <span className="text-gray-900 text-sm w-5 text-center">{item.quantity}</span>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="w-6 h-6 p-0"
-                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                      >
-                        <Plus className="w-3 h-3" />
-                      </Button>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={item.quantity}
+                        onChange={(event) => updateQuantity(item.id, Math.max(1, Math.floor(Number(event.target.value) || 1)))}
+                        className="h-8 w-16 bg-white px-2 text-center text-sm"
+                        aria-label={`Quantity for ${item.name}`}
+                      />
                       <Button
                         size="sm"
                         variant="ghost"
@@ -647,7 +681,7 @@ export function POSPage({
                 <CashDrawer
                   isOpen={isDrawerOpen}
                   onOpenChange={setIsDrawerOpen}
-                  cashier="John Cashier"
+                  cashier={cashierName}
                   dayBalance={dayBalance}
                   cashSalesToday={cashSalesToday}
                   onOpenDay={onOpenDay}
@@ -675,7 +709,7 @@ export function POSPage({
             </DialogHeader>
             <MultiPaymentHandler
               totalAmount={total}
-              customerName={selectedCustomerData?.name || 'Walk-in Customer'}
+              customerName={selectedCustomerData.name}
               onComplete={handleCompletePayment}
               onCancel={() => setShowMultiPayment(false)}
             />
@@ -695,7 +729,8 @@ export function POSPage({
               tax={lastTransaction.tax}
               total={lastTransaction.amount}
               paymentMethod={lastTransaction.method}
-              cashier="John Cashier"
+              cashier={cashierName}
+              customerName={lastTransaction.customer}
               onClose={() => setShowReceipt(false)}
             />
           </DialogContent>

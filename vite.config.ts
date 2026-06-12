@@ -35,6 +35,22 @@ export default defineConfig({
     },
   },
   server: {
+    watch: {
+      ignored: [
+        '**/*.log',
+        '**/*.err',
+        '**/django.log',
+        '**/django.err',
+        '**/vite.log',
+        '**/vite.err',
+        '**/frontend-*.log',
+        '**/frontend-*.err',
+        '**/backend/**/db.sqlite3',
+        '**/backend/**/logs/**',
+        '**/backend/**/media/**',
+        '**/dist/**'
+      ],
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8000',

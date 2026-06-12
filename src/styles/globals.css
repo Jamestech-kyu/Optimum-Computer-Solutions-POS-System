@@ -187,3 +187,121 @@
 html {
   font-size: var(--font-size);
 }
+
+@layer utilities {
+  .animate-page-enter {
+    animation: page-enter 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .animate-panel-enter {
+    animation: panel-enter 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .animate-soft-pop {
+    animation: soft-pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .animate-shimmer-slow {
+    animation: shimmer-slow 6s ease-in-out infinite;
+  }
+
+  .animate-float-slow {
+    animation: float-slow 7s ease-in-out infinite;
+  }
+
+  .animate-pulse-ring {
+    animation: pulse-ring 2.4s ease-out infinite;
+  }
+
+  .interactive-lift {
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background-color 180ms ease;
+  }
+
+  .interactive-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, 0.09);
+  }
+
+  .interactive-lift:active {
+    transform: translateY(0) scale(0.99);
+  }
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes soft-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shimmer-slow {
+  0%, 100% {
+    opacity: 0.38;
+    transform: translateX(-3%) rotate(var(--line-rotate, 0deg));
+  }
+  50% {
+    opacity: 0.72;
+    transform: translateX(3%) rotate(var(--line-rotate, 0deg));
+  }
+}
+
+@keyframes float-slow {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.32);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgba(37, 99, 235, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
+
+  .interactive-lift:hover,
+  .interactive-lift:active {
+    transform: none;
+  }
+}

@@ -5,6 +5,7 @@ import { Plus, ShoppingCart, Package, Users, Trophy } from 'lucide-react';
 import { formatCurrency } from './utils/helpers';
 import type { CompletedSale } from './pages/POSPageEnhanced';
 import type { UserRole } from '../types/auth';
+import { canUseQuickAction } from '../services/permissions';
 
 export type QuickActionId = 'new-sale' | 'add-product' | 'add-customer' | 'quick-invoice';
 
@@ -19,35 +20,30 @@ const quickActions: Array<{
   label: string;
   icon: typeof ShoppingCart;
   className: string;
-  roles: UserRole[];
 }> = [
   {
     id: 'new-sale',
     label: 'New Sale',
     icon: ShoppingCart,
-    className: 'bg-blue-600 hover:bg-blue-700',
-    roles: ['admin', 'manager', 'cashier']
+    className: 'bg-blue-600 hover:bg-blue-700'
   },
   {
     id: 'add-product',
     label: 'Add Product',
     icon: Package,
-    className: 'bg-green-600 hover:bg-green-700',
-    roles: ['admin', 'manager', 'storekeeper']
+    className: 'bg-green-600 hover:bg-green-700'
   },
   {
     id: 'add-customer',
     label: 'Add Customer',
     icon: Users,
-    className: 'bg-purple-600 hover:bg-purple-700',
-    roles: ['admin', 'manager', 'cashier']
+    className: 'bg-purple-600 hover:bg-purple-700'
   },
   {
     id: 'quick-invoice',
     label: 'Quick Invoice',
     icon: Plus,
-    className: 'bg-orange-600 hover:bg-orange-700',
-    roles: ['admin', 'manager', 'cashier']
+    className: 'bg-orange-600 hover:bg-orange-700'
   }
 ];
 
@@ -83,7 +79,7 @@ const getTopSellersForToday = (completedSales: CompletedSale[]) => {
 
 export function QuickActions({ completedSales, userRole, onAction }: QuickActionsProps) {
   const staffData = getTopSellersForToday(completedSales);
-  const availableActions = quickActions.filter(action => action.roles.includes(userRole));
+  const availableActions = quickActions.filter(action => canUseQuickAction(action.id, userRole));
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

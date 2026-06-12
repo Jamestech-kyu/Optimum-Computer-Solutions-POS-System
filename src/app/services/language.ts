@@ -6,7 +6,7 @@ type TranslationKey =
   | 'POS / Sales'
   | 'Invoices'
   | 'Customers'
-  | 'Products / Items'
+  | 'Stock levels'
   | 'Procurement'
   | 'Inventory'
   | 'Expenses'
@@ -61,7 +61,7 @@ const sw: Partial<Record<TranslationKey, string>> = {
   'POS / Sales': 'POS / Mauzo',
   Invoices: 'Ankara',
   Customers: 'Wateja',
-  'Products / Items': 'Bidhaa',
+  'Stock levels': 'Viwango vya Stoo',
   Procurement: 'Ununuzi',
   Inventory: 'Stoo',
   Expenses: 'Matumizi',
