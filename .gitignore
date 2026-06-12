@@ -17,6 +17,8 @@ Thumbs.db
 
 venv/
 .venv/
+venvdir/
+backend/backend/venvdir/
 __pycache__/
 *.pyc
 db.sqlite3
