@@ -2,7 +2,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 from django.utils.html import format_html
-from .models import User
+from .models import ShiftSession, User
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
@@ -203,3 +203,19 @@ class CustomUserAdmin(UserAdmin):
         updated = queryset.update(role='manager')
         self.message_user(request, f'{updated} users changed to Manager role.')
     make_manager.short_description = 'Change role to Manager'
+
+
+@admin.register(ShiftSession)
+class ShiftSessionAdmin(admin.ModelAdmin):
+    list_display = [
+        'user',
+        'started_at',
+        'expected_end_at',
+        'ended_at',
+        'is_active',
+        'is_overdue',
+        'progress_percent',
+    ]
+    list_filter = ['started_at', 'ended_at', 'expected_end_at', 'user__role']
+    search_fields = ['user__username', 'user__first_name', 'user__last_name', 'user__employee_id']
+    readonly_fields = ['created_at', 'updated_at', 'worked_seconds', 'remaining_seconds', 'progress_percent', 'is_overdue']

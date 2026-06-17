@@ -27,6 +27,7 @@ interface ProductSubItem {
   quantityLabel: string;
   priceMultiplier: number;
   stockUnits: number;
+  prices?: Partial<Record<PricingTier, number>>;
 }
 
 export interface POSProduct {
@@ -41,15 +42,42 @@ export interface POSProduct {
   modelNumber?: string;
   uom: string;
   prices: Record<PricingTier, number>;
+  costPrice?: number;
   stock: number;
   reorderLevel?: number;
   supplierId?: number;
   supplierName?: string;
+  supplierSku?: string;
+  expiryDate?: string;
+  quantityLevels?: Array<{
+    quantity: number;
+    label: string;
+    prices: Partial<Record<PricingTier, number>>;
+  }>;
   tax: number;
   image: string;
 }
 
 export const initialProducts: POSProduct[] = [];
+
+const quantifiableUnitLabels: Record<string, { singular: string; plural: string }> = {
+  kg: { singular: 'kg', plural: 'kg' },
+  g: { singular: 'g', plural: 'g' },
+  l: { singular: 'liter', plural: 'liters' },
+  liter: { singular: 'liter', plural: 'liters' },
+  litre: { singular: 'litre', plural: 'litres' },
+  ml: { singular: 'ml', plural: 'ml' },
+  meter: { singular: 'meter', plural: 'meters' },
+  metre: { singular: 'metre', plural: 'metres' }
+};
+
+const normalizeUnit = (unit: string) => unit.trim().toLowerCase();
+
+const formatQuantityLevel = (quantity: number, unit: string) => {
+  const unitLabel = quantifiableUnitLabels[normalizeUnit(unit)];
+  if (!unitLabel) return `${quantity} ${unit}`;
+  return `${quantity} ${quantity === 1 ? unitLabel.singular : unitLabel.plural}`;
+};
 
 interface CartItem {
   id: string;
@@ -106,6 +134,7 @@ interface POSPageProps {
   onOpenDay: (openingBalance: number) => void;
   onCloseDay: (closingBalance: number) => void;
   cashSalesToday: number;
+  cashExpensesToday: number;
 }
 
 export function POSPage({
@@ -116,7 +145,8 @@ export function POSPage({
   onTransactionComplete,
   onOpenDay,
   onCloseDay,
-  cashSalesToday
+  cashSalesToday,
+  cashExpensesToday
 }: POSPageProps) {
   const { t } = useAppLanguage();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -124,7 +154,8 @@ export function POSPage({
   const [scannerCode, setScannerCode] = useState('');
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState('walk-in');
+  const [expandedGridProductId, setExpandedGridProductId] = useState<string | null>(null);
+  const [selectedCustomerType, setSelectedCustomerType] = useState<PricingTier>('retail');
   const [discount, setDiscount] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -139,24 +170,21 @@ export function POSPage({
     items: [] as any[],
     subtotal: 0,
     discountAmount: 0,
-    tax: 0
+    tax: 0,
+    taxLabel: '0%'
   });
   const [cashTendered, setCashTendered] = useState('');
   const appSettings = getStoredAppSettings();
   const isScannerEnabled = appSettings.posSettings.scannerEnabled;
 
-  const activeCustomers = customers.filter(customer => customer.is_active && !customer.is_blacklisted);
   const customerOptions = [
-    { id: 'walk-in', name: 'Walk-in Customer', type: 'retail' as PricingTier },
-    ...activeCustomers.map(customer => ({
-      id: String(customer.id),
-      name: customer.name,
-      type: (customer.pricing_tier === 'wholesale' ? 'wholesale' : customer.pricing_tier === 'vip' ? 'loyal' : 'retail') as PricingTier,
-      customer
-    }))
+    { id: 'retail', name: 'Retail Customer', type: 'retail' as PricingTier },
+    { id: 'loyal', name: 'Loyalty Customer', type: 'loyal' as PricingTier },
+    { id: 'wholesale', name: 'Wholesale Customer', type: 'wholesale' as PricingTier },
+    { id: 'corporate', name: 'Corporate Customer', type: 'corporate' as PricingTier }
   ];
-  const selectedCustomerData = customerOptions.find(c => c.id === selectedCustomer) || customerOptions[0];
-  const selectedBackendCustomer = 'customer' in selectedCustomerData ? selectedCustomerData.customer : undefined;
+  const selectedCustomerData = customerOptions.find(c => c.type === selectedCustomerType) || customerOptions[0];
+  const selectedBackendCustomer = undefined;
   const customerType = selectedCustomerData.type;
 
   const filteredProducts = products.filter(product =>
@@ -170,31 +198,56 @@ export function POSPage({
   );
 
   function getProductSubItems(product: POSProduct): ProductSubItem[] {
-    if (product.category === 'Beverages') {
-      return [
-        { id: 'regular', name: `Regular ${product.uom}`, uom: product.uom, quantityLabel: `1 ${product.uom}`, priceMultiplier: 1, stockUnits: 1 },
-        { id: 'large', name: `Large ${product.uom}`, uom: product.uom, quantityLabel: `1 large ${product.uom}`, priceMultiplier: 1.35, stockUnits: 1 },
-        { id: 'takeaway', name: 'Takeaway pack', uom: 'pack', quantityLabel: '1 pack', priceMultiplier: 1.15, stockUnits: 1 }
-      ];
+    const unit = normalizeUnit(product.uom || 'piece');
+    const canUseQuantityLevels = Boolean(quantifiableUnitLabels[unit]);
+    const savedLevels = (product.quantityLevels || [])
+      .filter(level => level.quantity > 0)
+      .sort((left, right) => left.quantity - right.quantity);
+
+    if (savedLevels.length > 0) {
+      return savedLevels.map(level => ({
+        id: `quantity-${level.quantity}`,
+        name: level.label || formatQuantityLevel(level.quantity, product.uom),
+        uom: product.uom,
+        quantityLabel: level.label || formatQuantityLevel(level.quantity, product.uom),
+        priceMultiplier: level.quantity,
+        stockUnits: level.quantity,
+        prices: level.prices
+      }));
     }
 
-    if (product.category === 'Bakery') {
-      return [
-        { id: 'single', name: `Single ${product.uom}`, uom: product.uom, quantityLabel: `1 ${product.uom}`, priceMultiplier: 1, stockUnits: 1 },
-        { id: 'half-dozen', name: 'Half dozen', uom: 'pack', quantityLabel: '6 pieces', priceMultiplier: 5.5, stockUnits: 6 },
-        { id: 'dozen', name: 'Dozen pack', uom: 'pack', quantityLabel: '12 pieces', priceMultiplier: 10.5, stockUnits: 12 }
-      ];
+    if (canUseQuantityLevels) {
+      const maxLevel = Math.max(1, Math.min(10, Math.floor(product.stock || 10)));
+      return Array.from({ length: maxLevel }, (_, index) => {
+        const quantity = index + 1;
+        const label = formatQuantityLevel(quantity, product.uom);
+
+        return {
+          id: `quantity-${quantity}`,
+          name: label,
+          uom: product.uom,
+          quantityLabel: label,
+          priceMultiplier: quantity,
+          stockUnits: quantity
+        };
+      });
     }
 
+    const quantityLabel = formatQuantityLevel(1, product.uom || 'piece');
     return [
-      { id: 'single', name: `Single ${product.uom}`, uom: product.uom, quantityLabel: `1 ${product.uom}`, priceMultiplier: 1, stockUnits: 1 },
-      { id: 'family', name: 'Family portion', uom: 'portion', quantityLabel: '1 family portion', priceMultiplier: 2.8, stockUnits: 2 },
-      { id: 'combo', name: 'Combo serving', uom: 'combo', quantityLabel: '1 combo', priceMultiplier: 1.6, stockUnits: 1 }
+      {
+        id: 'single',
+        name: quantityLabel,
+        uom: product.uom,
+        quantityLabel,
+        priceMultiplier: 1,
+        stockUnits: 1
+      }
     ];
   }
 
   const addToCart = (product: POSProduct, subItem = getProductSubItems(product)[0]) => {
-    const price = product.prices[customerType] * subItem.priceMultiplier;
+    const price = subItem.prices?.[customerType] ?? product.prices[customerType] * subItem.priceMultiplier;
     const cartId = `${product.id}-${subItem.id}-${customerType}`;
     const existingItem = cart.find(item => item.id === cartId);
     const currentReserved = cart
@@ -237,6 +290,17 @@ export function POSPage({
     setSearchTerm('');
     setIsProductDropdownOpen(false);
     setExpandedProductId(null);
+    setExpandedGridProductId(null);
+  };
+
+  const handleProductCardClick = (product: POSProduct) => {
+    const subItems = getProductSubItems(product);
+    if (subItems.length <= 1) {
+      addToCart(product, subItems[0]);
+      return;
+    }
+
+    setExpandedGridProductId(previous => previous === product.id ? null : product.id);
   };
 
   const handleScannerSubmit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -295,11 +359,13 @@ export function POSPage({
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const discountAmount = subtotal * (discount / 100);
   const beforeTax = subtotal - discountAmount;
-  const totalTax = cart.reduce((sum, item) => {
-    const itemSubtotal = (item.price * item.quantity * item.tax) / 100;
-    return sum + itemSubtotal;
-  }, 0);
-  const total = beforeTax + totalTax;
+  const totalTax = 0;
+  const total = beforeTax;
+  const taxSummary = (() => {
+    const rates = Array.from(new Set(cart.map(item => Number(item.tax) || 0))).sort((left, right) => left - right);
+    if (rates.length === 0) return '0%';
+    return `${rates.map(rate => `${rate}%`).join(', ')} included`;
+  })();
   const change = Math.max(0, parseFloat(cashTendered || '0') - total);
 
   const handleCompletePayment = (payments: PaymentTransaction[]) => {
@@ -340,7 +406,8 @@ export function POSPage({
       items: receiptItems,
       subtotal: subtotal,
       discountAmount: discountAmount,
-      tax: totalTax
+      tax: totalTax,
+      taxLabel: taxSummary
     });
 
     onTransactionComplete({
@@ -451,7 +518,7 @@ export function POSPage({
                             />
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-sm font-medium text-gray-900">{product.name}</span>
-                              <span className="block truncate text-xs text-gray-500">{product.sku} - {subItems.length} subitems</span>
+                              <span className="block truncate text-xs text-gray-500">{product.sku} - {subItems.length} option{subItems.length === 1 ? '' : 's'}</span>
                             </span>
                             <span className="flex shrink-0 items-center gap-2">
                               <Badge variant="outline">{product.category}</Badge>
@@ -462,7 +529,7 @@ export function POSPage({
                             <div className="bg-gray-50 px-4 py-2">
                               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                                 {subItems.map(subItem => {
-                                  const price = product.prices[customerType] * subItem.priceMultiplier;
+                                  const price = subItem.prices?.[customerType] ?? product.prices[customerType] * subItem.priceMultiplier;
                                   return (
                                     <button
                                       key={subItem.id}
@@ -492,12 +559,14 @@ export function POSPage({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           {filteredProducts.map(product => {
-            const price = product.prices[customerType];
+            const subItems = getProductSubItems(product);
+            const isExpanded = expandedGridProductId === product.id;
+            const firstPrice = subItems[0]?.prices?.[customerType] ?? product.prices[customerType];
             return (
               <Card
                 key={product.id}
                 className="bg-white border-gray-200 cursor-pointer hover:shadow-lg transition-shadow"
-                onClick={() => addToCart(product)}
+                onClick={() => handleProductCardClick(product)}
               >
                 <CardContent className="p-4">
                   <ImageWithFallback
@@ -517,12 +586,41 @@ export function POSPage({
                       `}>
                         {customerType.charAt(0).toUpperCase() + customerType.slice(1)}
                       </Badge>
-                      <span className="text-green-600 font-bold">{formatCurrency(price)}</span>
+                      <span className="text-green-600 font-bold">{formatCurrency(firstPrice)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs text-gray-500">
                       <span>{t('Stock')}: {product.stock}</span>
                       <Badge variant="outline" className="capitalize">{product.uom}</Badge>
                     </div>
+                    {subItems.length > 1 && (
+                      <div className="rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+                        {isExpanded ? 'Select quantity below' : `${subItems.length} quantity options`}
+                      </div>
+                    )}
+                    {isExpanded && (
+                      <div className="mt-3 grid grid-cols-1 gap-2">
+                        {subItems.map(subItem => {
+                          const optionPrice = subItem.prices?.[customerType] ?? product.prices[customerType] * subItem.priceMultiplier;
+                          return (
+                            <button
+                              key={subItem.id}
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                selectProduct(product, subItem);
+                              }}
+                              className="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50"
+                            >
+                              <span>
+                                <span className="block text-sm font-medium text-gray-900">{subItem.name}</span>
+                                <span className="block text-xs text-gray-500">{subItem.quantityLabel}</span>
+                              </span>
+                              <span className="text-sm font-semibold text-green-600">{formatCurrency(optionPrice)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -544,14 +642,14 @@ export function POSPage({
             {/* Customer Selection */}
             <div>
               <label className="text-sm font-medium text-gray-600 mb-2 block">{t('Customer')}</label>
-              <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
+              <Select value={selectedCustomerType} onValueChange={(value) => setSelectedCustomerType(value as PricingTier)}>
                 <SelectTrigger className="bg-gray-100 border-gray-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {customerOptions.map(c => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.name} • {c.type}
+                      {c.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -622,7 +720,7 @@ export function POSPage({
                 )}
                 <div className="flex justify-between text-sm text-gray-600">
                   <span>{t('Tax')}:</span>
-                  <span>{formatCurrency(totalTax)}</span>
+                  <span>{taxSummary}</span>
                 </div>
                 <div className="flex justify-between text-lg font-bold text-gray-900 bg-blue-50 p-2 rounded">
                   <span>{t('Total')}:</span>
@@ -684,6 +782,7 @@ export function POSPage({
                   cashier={cashierName}
                   dayBalance={dayBalance}
                   cashSalesToday={cashSalesToday}
+                  cashExpensesToday={cashExpensesToday}
                   onOpenDay={onOpenDay}
                   onCloseDay={onCloseDay}
                 />
@@ -727,6 +826,7 @@ export function POSPage({
               discount={discount}
               discountAmount={lastTransaction.discountAmount}
               tax={lastTransaction.tax}
+              taxLabel={lastTransaction.taxLabel}
               total={lastTransaction.amount}
               paymentMethod={lastTransaction.method}
               cashier={cashierName}
@@ -739,4 +839,5 @@ export function POSPage({
     </div>
   );
 }
+
 

@@ -3,11 +3,13 @@ import base64
 import uuid
 
 from django.core.files.base import ContentFile
+from django.utils import timezone
 from django.utils.text import slugify
+from datetime import timedelta
 from rest_framework import serializers
 from decimal import Decimal
 from .models import Category, Product, ProductImage
-from inventory.models import InventoryAlert, StockMovement, StoreStock, Supplier
+from inventory.models import Batch, InventoryAlert, StockMovement, StoreStock, Supplier
 from notifications.utils import create_role_notifications
 
 
@@ -22,8 +24,7 @@ class CategorySerializer(serializers.ModelSerializer):
         model = Category
         fields = [
             'id', 'name', 'slug', 'description', 'parent', 'parent_name',
-            'icon', 'color', 'is_active', 'full_path', 'level',
-            'children_count', 'created_at', 'updated_at'
+            'is_active', 'full_path', 'children_count', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'slug', 'created_at', 'updated_at']
     
@@ -82,6 +83,7 @@ class ProductSerializer(serializers.ModelSerializer):
     images = ProductImageSerializer(many=True, read_only=True)
     image_url = serializers.SerializerMethodField()
     image_data = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    expiry_date = serializers.DateField(write_only=True, required=False, allow_null=True)
     
     profit_margin = serializers.DecimalField(read_only=True, max_digits=10, decimal_places=2)
     is_low_stock = serializers.BooleanField(read_only=True)
@@ -98,6 +100,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'unit', 'tax_rate', 'weight', 'length', 'width', 'height',
             'is_active', 'is_featured', 'is_digital', 'main_image',
             'external_image_url', 'image_url', 'image_data', 'category_name_input',
+            'expiry_date',
             'profit_margin', 'is_low_stock', 'stock_value',
             'notes', 'created_at', 'updated_at', 'last_purchased_at',
             'images'
@@ -240,16 +243,82 @@ class ProductSerializer(serializers.ModelSerializer):
                 is_resolved=False,
             ).update(is_resolved=True)
 
+    def _create_opening_batch(self, instance, expiry_date):
+        if not expiry_date:
+            return
+
+        quantity = Decimal(str(instance.stock_quantity or 0))
+        if quantity <= 0:
+            return
+
+        batch = Batch.objects.create(
+            batch_number=f'OPEN-{instance.pk}-{timezone.now().strftime("%Y%m%d%H%M%S")}',
+            product=instance,
+            quantity=quantity,
+            remaining_quantity=quantity,
+            expiry_date=expiry_date,
+            purchase_price=instance.cost_price,
+            supplier=instance.supplier,
+            location='Main Warehouse',
+            notes='Opening stock batch created from product add item form.',
+        )
+
+        today = timezone.now().date()
+        days_until_expiry = (expiry_date - today).days
+        if days_until_expiry < 0:
+            InventoryAlert.objects.get_or_create(
+                alert_type='expired',
+                product=instance,
+                batch=batch,
+                store=batch.location,
+                is_resolved=False,
+                defaults={
+                    'priority': 'critical',
+                    'message': f'{instance.name} expired on {expiry_date}.',
+                    'suggested_action': 'Remove expired stock from sale and review the batch.',
+                },
+            )
+            create_role_notifications(
+                title='Expired stock warning',
+                message=f'{instance.name} expired on {expiry_date}.',
+                priority='critical',
+                related_product=instance,
+                metadata={'event': 'expired', 'batch': batch.batch_number, 'store': batch.location},
+            )
+        elif expiry_date <= today + timedelta(days=30):
+            InventoryAlert.objects.get_or_create(
+                alert_type='expiring',
+                product=instance,
+                batch=batch,
+                store=batch.location,
+                is_resolved=False,
+                defaults={
+                    'priority': 'high' if days_until_expiry <= 7 else 'medium',
+                    'message': f'{instance.name} expires on {expiry_date} ({days_until_expiry} day{"s" if days_until_expiry != 1 else ""} remaining).',
+                    'suggested_action': 'Prioritize this batch for sale or plan a markdown/return.',
+                },
+            )
+            create_role_notifications(
+                title='Expiry date warning',
+                message=f'{instance.name} expires on {expiry_date} ({days_until_expiry} day{"s" if days_until_expiry != 1 else ""} remaining).',
+                priority='high' if days_until_expiry <= 7 else 'medium',
+                related_product=instance,
+                metadata={'event': 'expiring', 'batch': batch.batch_number, 'store': batch.location},
+            )
+
     def create(self, validated_data):
         image_data = validated_data.pop('image_data', '')
+        expiry_date = validated_data.pop('expiry_date', None)
         self._apply_category_name(validated_data)
         instance = super().create(validated_data)
         self._apply_image_data(instance, image_data)
         self._sync_inventory_records(instance, previous_stock=0)
+        self._create_opening_batch(instance, expiry_date)
         return instance
 
     def update(self, instance, validated_data):
         image_data = validated_data.pop('image_data', '')
+        validated_data.pop('expiry_date', None)
         previous_stock = instance.stock_quantity
         self._apply_category_name(validated_data)
         instance = super().update(instance, validated_data)

@@ -9,16 +9,30 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import update_last_login
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import User
+from .models import SHIFT_TRACKING_EXCLUDED_ROLES, ShiftSession, User
 from .serializers import (
     UserSerializer, 
     UserLoginSerializer, 
     UserChangePasswordSerializer,
     UserRoleUpdateSerializer,
-    UserApprovalSerializer
+    UserApprovalSerializer,
+    ShiftSessionSerializer
 )
 
-PUBLIC_REGISTRATION_ROLES = ['manager', 'accountant', 'cashier', 'inventory_clerk', 'viewer']
+
+def ensure_shift_tracking_allowed(user):
+    return user.role not in SHIFT_TRACKING_EXCLUDED_ROLES
+
+
+def start_shift_for_user(user):
+    if not ensure_shift_tracking_allowed(user):
+        return None, False
+
+    active_shift = user.shift_sessions.filter(ended_at__isnull=True).order_by('-started_at').first()
+    if active_shift:
+        return active_shift, False
+
+    return ShiftSession.objects.create(user=user), True
 
 class UserViewSet(viewsets.ModelViewSet):
     """
@@ -64,9 +78,7 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def get_permissions(self):
         """Custom permissions based on action"""
-        if self.action in ['create', 'login']:
-            # Allow anyone to create? Or only admins?
-            # For now, allow anyone but you can change
+        if self.action == 'login':
             return [AllowAny()]
         if self.action in ['update_role', 'approve', 'reject', 'destroy']:
             # Only admins can change roles or delete users
@@ -74,37 +86,28 @@ class UserViewSet(viewsets.ModelViewSet):
             # Add custom permission check in the method
         return super().get_permissions()
 
+    def create(self, request, *args, **kwargs):
+        if request.user.role not in ['super_admin', 'admin']:
+            return Response(
+                {"error": "Only administrators can create user accounts"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         creator = self.request.user
-        is_admin_created = (
-            creator.is_authenticated
-            and getattr(creator, 'role', None) in ['super_admin', 'admin']
-        )
 
         requested_role = serializer.validated_data.get('role')
         if requested_role in ['super_admin', 'admin'] and getattr(creator, 'role', None) != 'super_admin':
             serializer.validated_data['role'] = 'cashier'
 
         user = serializer.save()
-
-        if is_admin_created:
-            user.approve(creator)
-            user.save(update_fields=[
-                'is_active', 'approval_status', 'approved_at', 'approved_by',
-                'rejected_at', 'rejected_by'
-            ])
-            return
-
-        if user.role not in PUBLIC_REGISTRATION_ROLES:
-            user.role = 'cashier'
-
-        user.mark_pending_approval()
-        if not user.approval_notes:
-            user.approval_notes = 'Pending admin approval'
+        user.approve(creator)
+        user.must_change_password = True
+        user.approval_notes = 'Created by administrator. User must change password after first login.'
         user.save(update_fields=[
-            'role', 'is_active', 'approval_status', 'approval_requested_at',
-            'approval_deadline_at', 'approved_at', 'approved_by',
-            'rejected_at', 'rejected_by', 'approval_notes'
+            'is_active', 'approval_status', 'approved_at', 'approved_by',
+            'rejected_at', 'rejected_by', 'must_change_password', 'approval_notes'
         ])
     
     @action(detail=False, methods=['get'], url_path='me')
@@ -192,6 +195,7 @@ class UserViewSet(viewsets.ModelViewSet):
         user.is_online = True
         user.last_activity = timezone.now()
         update_last_login(None, user)
+        start_shift_for_user(user)
         
         # Get client IP
         x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
@@ -209,7 +213,8 @@ class UserViewSet(viewsets.ModelViewSet):
             'refresh': str(refresh),
             'access': str(refresh.access_token),
             'user': UserSerializer(user).data,
-            'permissions': user.get_permissions_list()
+            'permissions': user.get_permissions_list(),
+            'must_change_password': user.must_change_password
         })
     
     @action(detail=False, methods=['post'], url_path='logout')
@@ -223,6 +228,9 @@ class UserViewSet(viewsets.ModelViewSet):
         user = request.user
         user.is_online = False
         user.save(update_fields=['is_online'])
+        active_shift = user.shift_sessions.filter(ended_at__isnull=True).order_by('-started_at').first()
+        if active_shift:
+            active_shift.clock_out()
         
         # Optionally blacklist the refresh token
         try:
@@ -234,6 +242,73 @@ class UserViewSet(viewsets.ModelViewSet):
             pass
         
         return Response({"message": "Successfully logged out"})
+
+    @action(detail=True, methods=['post'], url_path='clock-in')
+    def clock_in(self, request, pk=None):
+        """
+        POST /api/users/{id}/clock-in/
+
+        Start an 8-hour shift for a non-manager/non-admin staff member.
+        """
+        user = self.get_object()
+
+        if request.user.id != user.id and request.user.role not in ['super_admin', 'admin', 'manager']:
+            return Response(
+                {"error": "You can only clock in your own shift"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if not ensure_shift_tracking_allowed(user):
+            return Response(
+                {"error": "Managers and administrators are not shift-tracked"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        shift, created = start_shift_for_user(user)
+        response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(ShiftSessionSerializer(shift).data, status=response_status)
+
+    @action(detail=True, methods=['post'], url_path='clock-out')
+    def clock_out(self, request, pk=None):
+        """
+        POST /api/users/{id}/clock-out/
+
+        Complete the active shift for a non-manager/non-admin staff member.
+        """
+        user = self.get_object()
+
+        if request.user.id != user.id and request.user.role not in ['super_admin', 'admin', 'manager']:
+            return Response(
+                {"error": "You can only clock out your own shift"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if not ensure_shift_tracking_allowed(user):
+            return Response(
+                {"error": "Managers and administrators are not shift-tracked"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        active_shift = user.shift_sessions.filter(ended_at__isnull=True).order_by('-started_at').first()
+        if not active_shift:
+            return Response(
+                {"error": "No active shift found for this staff member"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        active_shift.clock_out()
+        return Response(ShiftSessionSerializer(active_shift).data)
+
+    @action(detail=False, methods=['get'], url_path='shift-status')
+    def shift_status(self, request):
+        """
+        GET /api/users/shift-status/
+
+        Return active and recent 8-hour shifts for visible staff members.
+        """
+        visible_users = self.get_queryset().exclude(role__in=SHIFT_TRACKING_EXCLUDED_ROLES)
+        shifts = ShiftSession.objects.filter(user__in=visible_users).select_related('user')[:100]
+        return Response(ShiftSessionSerializer(shifts, many=True).data)
     
     @action(detail=True, methods=['post'], url_path='change-password')
     def change_password(self, request, pk=None):
@@ -267,9 +342,26 @@ class UserViewSet(viewsets.ModelViewSet):
         
         # Set new password
         user.set_password(serializer.validated_data['new_password'])
-        user.save()
+        user.must_change_password = False
+        user.save(update_fields=['password', 'must_change_password'])
         
         return Response({"message": "Password changed successfully"})
+
+    def update(self, request, *args, **kwargs):
+        if request.user.role not in ['super_admin', 'admin']:
+            return Response(
+                {"error": "Only administrators can update user accounts"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if request.user.role not in ['super_admin', 'admin']:
+            return Response(
+                {"error": "Only administrators can update user accounts"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().partial_update(request, *args, **kwargs)
     
     @action(detail=True, methods=['patch'], url_path='update-role')
     def update_role(self, request, pk=None):
@@ -415,6 +507,12 @@ class UserViewSet(viewsets.ModelViewSet):
     
     def destroy(self, request, *args, **kwargs):
         """Soft delete - deactivate instead of delete"""
+        if request.user.role not in ['super_admin', 'admin']:
+            return Response(
+                {"error": "Only administrators can delete user accounts"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         user = self.get_object()
         
         if user.id == request.user.id:
@@ -426,6 +524,9 @@ class UserViewSet(viewsets.ModelViewSet):
         user.is_active = False
         user.is_online = False
         user.save()
+        active_shift = user.shift_sessions.filter(ended_at__isnull=True).order_by('-started_at').first()
+        if active_shift:
+            active_shift.clock_out()
         
         return Response(
             {"message": f"User {user.username} has been deactivated"},

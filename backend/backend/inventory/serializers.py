@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from .models import (
     StockMovement, Supplier, Batch, PurchaseOrder, PurchaseOrderItem,
+    GoodsReceivedNote, GoodsReceivedNoteItem,
     StockCount, StockCountItem, StoreTransfer, StoreTransferItem,
     StoreStock, InventoryAlert, ImportJob
 
@@ -125,12 +126,13 @@ class PurchaseOrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     product_sku = serializers.SerializerMethodField()
     remaining_to_receive = serializers.DecimalField(read_only=True, max_digits=12, decimal_places=2)
+    pending_verification_quantity = serializers.DecimalField(read_only=True, max_digits=12, decimal_places=2)
     
     class Meta:
         model = PurchaseOrderItem
         fields = [
             'id', 'product', 'product_name', 'product_sku', 'quantity',
-            'quantity_received', 'remaining_to_receive', 'unit_cost',
+            'quantity_received', 'remaining_to_receive', 'pending_verification_quantity', 'unit_cost',
             'subtotal', 'discount_percentage', 'discount_amount', 'total',
             'expected_delivery_date', 'notes'
         ]
@@ -152,6 +154,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     approved_by_name = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
+    goods_received_notes = serializers.SerializerMethodField()
     
     # Write-only for creating items
     order_items = serializers.ListField(
@@ -171,7 +174,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             'payment_status', 'shipping_method', 'tracking_number', 'courier',
             'supplier_notes', 'internal_notes', 'created_by', 'created_by_name',
             'approved_by', 'approved_by_name', 'approved_at',
-            'created_at', 'updated_at', 'items', 'order_items'
+            'created_at', 'updated_at', 'items', 'goods_received_notes', 'order_items'
         ]
         read_only_fields = [
             'id', 'po_number', 'uuid', 'order_date', 'subtotal', 'total',
@@ -189,6 +192,18 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     
     def get_status_display(self, obj):
         return dict(PurchaseOrder.ORDER_STATUS).get(obj.status, obj.status)
+
+    def get_goods_received_notes(self, obj):
+        return [
+            {
+                'id': grn.id,
+                'grn_number': grn.grn_number,
+                'status': grn.status,
+                'created_at': grn.created_at,
+                'verified_at': grn.verified_at,
+            }
+            for grn in obj.goods_received_notes.all()
+        ]
     
     def validate_order_items(self, value):
         """Validate order items before processing"""
@@ -236,6 +251,81 @@ class PurchaseOrderReceiveSerializer(serializers.Serializer):
     expiry_date = serializers.DateField(required=False, allow_null=True)
     location = serializers.CharField(required=False, default='Main Store')
     notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class GoodsReceivedNoteItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+    product_sku = serializers.SerializerMethodField()
+    purchase_order_item_id = serializers.IntegerField(source='purchase_order_item.id', read_only=True)
+    verified_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GoodsReceivedNoteItem
+        fields = [
+            'id', 'purchase_order_item_id', 'product', 'product_name',
+            'product_sku', 'quantity', 'batch_number', 'manufacturing_date',
+            'expiry_date', 'location', 'notes', 'is_verified',
+            'verified_by', 'verified_by_name', 'verified_at'
+        ]
+        read_only_fields = ['id', 'is_verified', 'verified_by', 'verified_at']
+
+    def get_product_name(self, obj):
+        return obj.product.name
+
+    def get_product_sku(self, obj):
+        return obj.product.sku
+
+    def get_verified_by_name(self, obj):
+        if not obj.verified_by:
+            return None
+        return obj.verified_by.get_full_name() or obj.verified_by.username
+
+
+class GoodsReceivedNoteSerializer(serializers.ModelSerializer):
+    items = GoodsReceivedNoteItemSerializer(many=True, read_only=True)
+    purchase_order_number = serializers.SerializerMethodField()
+    supplier_name = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+    verified_by_name = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GoodsReceivedNote
+        fields = [
+            'id', 'grn_number', 'purchase_order', 'purchase_order_number',
+            'supplier', 'supplier_name', 'status', 'status_display',
+            'created_by', 'created_by_name', 'verified_by', 'verified_by_name',
+            'verified_at', 'notes', 'created_at', 'updated_at', 'items'
+        ]
+        read_only_fields = [
+            'id', 'grn_number', 'created_by', 'verified_by', 'verified_at',
+            'created_at', 'updated_at'
+        ]
+
+    def get_purchase_order_number(self, obj):
+        return obj.purchase_order.po_number
+
+    def get_supplier_name(self, obj):
+        return obj.supplier.name
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_full_name() or obj.created_by.username
+
+    def get_verified_by_name(self, obj):
+        if not obj.verified_by:
+            return None
+        return obj.verified_by.get_full_name() or obj.verified_by.username
+
+    def get_status_display(self, obj):
+        return dict(GoodsReceivedNote.GRN_STATUS).get(obj.status, obj.status)
+
+
+class GoodsReceivedNoteVerifySerializer(serializers.Serializer):
+    item_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        required=False,
+        help_text='Optional GRN item ids to verify. Omit to verify the whole GRN.'
+    )
 
 
 class StockCountItemSerializer(serializers.ModelSerializer):

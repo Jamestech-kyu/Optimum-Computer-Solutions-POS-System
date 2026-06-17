@@ -3,6 +3,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from .models import (
     Supplier, Batch, StockMovement, PurchaseOrder, PurchaseOrderItem,
+    GoodsReceivedNote, GoodsReceivedNoteItem,
     StockCount, StockCountItem, StoreTransfer, StoreTransferItem,
     StoreStock, InventoryAlert
 )
@@ -109,6 +110,27 @@ class PurchaseOrderAdmin(admin.ModelAdmin):
         updated = queryset.update(payment_status='paid')
         self.message_user(request, f'{updated} purchase orders marked paid.')
     mark_paid.short_description = 'Mark selected purchase orders as paid'
+
+
+class GoodsReceivedNoteItemInline(admin.TabularInline):
+    model = GoodsReceivedNoteItem
+    extra = 0
+    readonly_fields = [
+        'purchase_order_item', 'product', 'quantity', 'batch_number',
+        'location', 'is_verified', 'verified_by', 'verified_at'
+    ]
+
+
+@admin.register(GoodsReceivedNote)
+class GoodsReceivedNoteAdmin(admin.ModelAdmin):
+    list_display = ['grn_number', 'purchase_order', 'supplier', 'status', 'created_at', 'verified_at']
+    list_filter = ['status', 'created_at', 'verified_at']
+    search_fields = ['grn_number', 'purchase_order__po_number', 'supplier__name']
+    readonly_fields = [
+        'grn_number', 'created_by', 'verified_by', 'verified_at',
+        'created_at', 'updated_at'
+    ]
+    inlines = [GoodsReceivedNoteItemInline]
 
 
 @admin.register(StockCount)

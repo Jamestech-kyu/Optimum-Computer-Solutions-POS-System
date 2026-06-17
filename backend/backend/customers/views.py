@@ -32,6 +32,12 @@ class CustomerViewSet(viewsets.ModelViewSet):
             return CustomerLoyaltySerializer
         return CustomerSerializer
 
+    def get_queryset(self):
+        queryset = Customer.objects.all()
+        if self.request.query_params.get('include_inactive') == 'true':
+            return queryset
+        return queryset.filter(is_active=True)
+
     @action(detail=True, methods=['post'], url_path='redeem-points')
     def redeem_points(self, request, pk=None):
         customer = self.get_object()

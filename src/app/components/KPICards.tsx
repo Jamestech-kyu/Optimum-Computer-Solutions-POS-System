@@ -9,12 +9,13 @@ interface KPICardsProps {
   completedSales: CompletedSale[];
   dayBalance: DayBalance;
   cashSalesToday: number;
+  cashExpensesToday: number;
 }
 
-export function KPICards({ completedSales, dayBalance, cashSalesToday }: KPICardsProps) {
+export function KPICards({ completedSales, dayBalance, cashSalesToday, cashExpensesToday }: KPICardsProps) {
   const totalSales = completedSales.reduce((sum, sale) => sum + sale.amount, 0);
   const totalTransactions = completedSales.length;
-  const expectedClosingBalance = dayBalance.openingBalance + cashSalesToday;
+  const expectedClosingBalance = dayBalance.openingBalance + cashSalesToday - cashExpensesToday;
 
   const kpiData = [
     {
@@ -28,8 +29,8 @@ export function KPICards({ completedSales, dayBalance, cashSalesToday }: KPICard
     {
       title: 'Expected Closing Balance',
       value: formatCurrency(expectedClosingBalance),
-      change: `${formatCurrency(cashSalesToday)} cash sales`,
-      changeType: cashSalesToday > 0 ? 'positive' : 'neutral',
+      change: `${formatCurrency(cashSalesToday)} sales - ${formatCurrency(cashExpensesToday)} expenses`,
+      changeType: expectedClosingBalance >= dayBalance.openingBalance ? 'positive' : 'neutral',
       icon: TrendingUp,
       color: 'text-green-600'
     },

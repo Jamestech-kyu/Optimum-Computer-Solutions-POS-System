@@ -9,6 +9,10 @@ from django.db.models import Q, Sum, F, Avg, Count, Case, When, IntegerField
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
+from django.http import HttpResponse
+from django.conf import settings
+from django.core.mail import EmailMessage
+from django.urls import reverse
 from decimal import Decimal
 import pandas as pd
 
@@ -17,12 +21,14 @@ from datetime import datetime, timedelta
 
 from .models import (
     StockMovement, Batch, PurchaseOrder, PurchaseOrderItem,
+    GoodsReceivedNote,
     StockCount, StockCountItem, StoreTransfer, StoreTransferItem,
     StoreStock, InventoryAlert
 )
 from .serializers import (
     StockMovementSerializer, BatchSerializer, PurchaseOrderSerializer,
-    PurchaseOrderReceiveSerializer, StockCountSerializer,
+    PurchaseOrderReceiveSerializer, GoodsReceivedNoteSerializer,
+    GoodsReceivedNoteVerifySerializer, StockCountSerializer,
     StoreTransferSerializer, StoreStockSerializer, InventoryAlertSerializer,
     BulkStockUpdateSerializer, BulkPriceUpdateSerializer,
     StockMovementFilterSerializer,ImportJobSerializer,
@@ -32,6 +38,65 @@ from products.models import Product, Category
 from .models import Supplier, ImportJob
 from users.models import User
 
+
+def has_inventory_write_access(user):
+    return getattr(user, 'role', None) in ['super_admin', 'admin', 'manager', 'inventory_clerk']
+
+
+def has_purchase_approval_access(user):
+    return getattr(user, 'role', None) in ['super_admin', 'admin', 'manager']
+
+
+def build_purchase_order_pdf(purchase_order):
+    def escape_pdf_text(value):
+        return str(value).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+    lines = [
+        'Local Purchase Order',
+        f'PO Number: {purchase_order.po_number}',
+        f'Supplier: {purchase_order.supplier.name}',
+        f'Email: {purchase_order.supplier.email or "Not captured"}',
+        f'Order Date: {purchase_order.order_date.strftime("%Y-%m-%d")}',
+        '',
+        'Item | SKU | Supplier SKU | Qty | Unit Cost | Line Total',
+    ]
+    for item in purchase_order.items.select_related('product'):
+        lines.append(
+            f'{item.product.name} | {item.product.sku} | {item.product.supplier_sku or item.product.sku} | '
+            f'{item.quantity:g} | {item.unit_cost:,.2f} | {item.total:,.2f}'
+        )
+    lines.extend(['', f'PO Total: {purchase_order.total:,.2f}'])
+
+    text_commands = ['BT', '/F1 11 Tf', '50 790 Td']
+    for index, line in enumerate(lines[:42]):
+        if index > 0:
+            text_commands.append('0 -18 Td')
+        text_commands.append(f'({escape_pdf_text(line)}) Tj')
+    text_commands.append('ET')
+    stream = '\n'.join(text_commands).encode('utf-8')
+
+    objects = [
+        b'1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n',
+        b'2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n',
+        b'3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj\n',
+        b'4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n',
+        f'5 0 obj << /Length {len(stream)} >> stream\n'.encode('utf-8') + stream + b'\nendstream endobj\n',
+    ]
+
+    pdf = io.BytesIO()
+    pdf.write(b'%PDF-1.4\n')
+    offsets = []
+    for obj in objects:
+        offsets.append(pdf.tell())
+        pdf.write(obj)
+    xref_offset = pdf.tell()
+    pdf.write(f'xref\n0 {len(objects) + 1}\n'.encode('utf-8'))
+    pdf.write(b'0000000000 65535 f \n')
+    for offset in offsets:
+        pdf.write(f'{offset:010d} 00000 n \n'.encode('utf-8'))
+    pdf.write(f'trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF'.encode('utf-8'))
+    pdf.seek(0)
+    return pdf
 
 
 class BatchViewSet(viewsets.ModelViewSet):
@@ -208,6 +273,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        if not has_inventory_write_access(request.user):
+            return Response(
+                {"error": "You do not have permission to create purchase orders"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().create(request, *args, **kwargs)
     
     @action(detail=True, methods=['post'], url_path='submit')
     def submit_order(self, request, pk=None):
@@ -233,7 +306,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         po = self.get_object()
         
         # Check permission
-        if request.user.role not in ['super_admin', 'admin', 'manager']:
+        if not has_purchase_approval_access(request.user):
             return Response(
                 {"error": "Only managers can approve purchase orders"},
                 status=status.HTTP_403_FORBIDDEN
@@ -257,11 +330,27 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='receive')
     def receive_order(self, request, pk=None):
         """Receive items from purchase order"""
+        if not has_inventory_write_access(request.user):
+            return Response(
+                {"error": "You do not have permission to receive purchase orders"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         po = self.get_object()
-        
-        if po.status not in ['confirmed', 'shipped', 'received']:
+
+        if po.status in ['draft', 'submitted']:
+            po.status = 'confirmed'
+            po.save(update_fields=['status', 'updated_at'])
+
+        if po.status not in ['confirmed', 'shipped', 'receiving', 'received']:
             return Response(
                 {"error": f"Cannot receive order with status: {po.status}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not isinstance(request.data, list) or len(request.data) == 0:
+            return Response(
+                {"error": "Add at least one item with a received quantity before posting the GRN."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -269,21 +358,41 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        pending_grn = po.goods_received_notes.filter(
+            status='pending',
+            items__is_verified=False
+        ).distinct().order_by('-created_at').first()
+
+        if pending_grn:
+            return Response({
+                'message': 'Pending goods received note found. Verify the GRN to post stock.',
+                'status': po.status,
+                'goods_received_note': GoodsReceivedNoteSerializer(pending_grn).data,
+                'purchase_order': self.get_serializer(po).data
+            })
         
         try:
-            po.receive_items(request.user, serializer.validated_data)
+            grn = po.receive_items(request.user, serializer.validated_data)
         except ValidationError as error:
             return Response({'error': str(error)}, status=status.HTTP_400_BAD_REQUEST)
         
         return Response({
-            'message': 'Items received successfully',
+            'message': 'Goods received note created. Verify the GRN to post stock.',
             'status': po.status,
+            'goods_received_note': GoodsReceivedNoteSerializer(grn).data,
             'purchase_order': self.get_serializer(po).data
         })
     
     @action(detail=True, methods=['post'], url_path='cancel')
     def cancel_order(self, request, pk=None):
         """Cancel purchase order"""
+        if not has_purchase_approval_access(request.user):
+            return Response(
+                {"error": "Only managers can cancel purchase orders"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         po = self.get_object()
         
         if po.status in ['completed', 'cancelled']:
@@ -298,6 +407,112 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         return Response({
             'message': 'Purchase order cancelled',
             'status': po.status
+        })
+
+    @action(detail=True, methods=['get'], url_path='pdf')
+    def download_pdf(self, request, pk=None):
+        """Download purchase order PDF"""
+        po = self.get_object()
+        pdf_buffer = build_purchase_order_pdf(po)
+        response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{po.po_number}.pdf"'
+        return response
+
+    @action(detail=True, methods=['post'], url_path='send-to-supplier')
+    def send_to_supplier(self, request, pk=None):
+        """Email purchase order PDF to supplier"""
+        po = self.get_object()
+        supplier_email = po.supplier.email
+
+        if not supplier_email:
+            return Response(
+                {"error": f"Supplier {po.supplier.name} does not have an email address."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        pdf_url = request.build_absolute_uri(reverse('purchase-order-download-pdf', kwargs={'pk': po.pk}))
+        pdf_buffer = build_purchase_order_pdf(po)
+        subject = f'Purchase Order {po.po_number}'
+        message = (
+            f'Dear {po.supplier.name},\n\n'
+            f'Please find attached purchase order {po.po_number}.\n\n'
+            f'You can also download it here:\n{pdf_url}\n\n'
+            'Regards,\nPOS Admin'
+        )
+
+        email = EmailMessage(
+            subject=subject,
+            body=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[supplier_email],
+        )
+        email.attach(f'{po.po_number}.pdf', pdf_buffer.getvalue(), 'application/pdf')
+        email.send(fail_silently=False)
+
+        if po.status == 'draft':
+            po.submit()
+
+        return Response({
+            'message': f'Purchase order emailed to {supplier_email}',
+            'email': supplier_email,
+            'download_url': pdf_url,
+            'status': po.status,
+            'purchase_order': self.get_serializer(po).data
+        })
+
+
+class GoodsReceivedNoteViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet for Goods Received Notes.
+    GRNs are created from purchase orders and only post stock when verified.
+    """
+
+    queryset = GoodsReceivedNote.objects.select_related(
+        'purchase_order', 'supplier', 'created_by', 'verified_by'
+    ).prefetch_related('items__product', 'items__purchase_order_item')
+    serializer_class = GoodsReceivedNoteSerializer
+    permission_classes = [IsAuthenticated]
+
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['purchase_order', 'supplier', 'status']
+    search_fields = ['grn_number', 'purchase_order__po_number', 'supplier__name']
+    ordering_fields = ['created_at', 'verified_at']
+    ordering = ['-created_at']
+
+    @action(detail=True, methods=['post'], url_path='verify')
+    def verify_grn(self, request, pk=None):
+        if not has_inventory_write_access(request.user):
+            return Response(
+                {"error": "You do not have permission to verify goods received notes"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        grn = self.get_object()
+        serializer = GoodsReceivedNoteVerifySerializer(data=request.data or {})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        if grn.status == 'verified':
+            return Response({
+                'message': 'GRN already verified and posted to stock',
+                'posted_count': 0,
+                'goods_received_note': self.get_serializer(grn).data,
+                'purchase_order': PurchaseOrderSerializer(grn.purchase_order).data
+            })
+
+        try:
+            posted_count = grn.verify_items(
+                request.user,
+                serializer.validated_data.get('item_ids')
+            )
+        except ValidationError as error:
+            return Response({'error': str(error)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'message': f'{posted_count} GRN item(s) verified and posted to stock',
+            'posted_count': posted_count,
+            'goods_received_note': self.get_serializer(grn).data,
+            'purchase_order': PurchaseOrderSerializer(grn.purchase_order).data
         })
 
 

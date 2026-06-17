@@ -15,16 +15,18 @@ interface DashboardProps {
   completedSales: CompletedSale[];
   dayBalance: DayBalance;
   cashSalesToday: number;
+  cashExpensesToday: number;
   userRole: UserRole;
   onQuickAction: (action: QuickActionId) => void;
 }
 
-export function Dashboard({ products, completedSales, dayBalance, cashSalesToday, userRole, onQuickAction }: DashboardProps) {
+export function Dashboard({ products, completedSales, dayBalance, cashSalesToday, cashExpensesToday, userRole, onQuickAction }: DashboardProps) {
   const todayKey = new Date().toISOString().slice(0, 10);
   const todaySales = completedSales.filter(sale => new Date(sale.timestamp).toISOString().slice(0, 10) === todayKey);
   const todayRevenue = todaySales.reduce((sum, sale) => sum + sale.amount, 0);
   const lowStockItems = products.filter(product => product.stock <= (product.reorderLevel || 10));
-  const cashVariance = cashSalesToday - dayBalance.expectedCash;
+  const expectedCash = dayBalance.openingBalance + cashSalesToday - cashExpensesToday;
+  const cashVariance = dayBalance.closingBalance === null ? 0 : dayBalance.closingBalance - expectedCash;
   const hasCriticalAlerts = lowStockItems.length > 0 || cashVariance < 0;
 
   return (
@@ -41,6 +43,7 @@ export function Dashboard({ products, completedSales, dayBalance, cashSalesToday
         completedSales={completedSales}
         dayBalance={dayBalance}
         cashSalesToday={cashSalesToday}
+        cashExpensesToday={cashExpensesToday}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">

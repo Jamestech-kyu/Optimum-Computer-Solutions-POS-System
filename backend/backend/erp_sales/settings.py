@@ -235,6 +235,7 @@ CHANNEL_LAYERS = {
 
 # EMAIL
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='pos-admin@example.com')
 
 
 # M-PESA

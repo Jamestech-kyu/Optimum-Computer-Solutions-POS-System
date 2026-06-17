@@ -5,11 +5,10 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db import models
 from django.db.models import Sum, Count
 from django.utils import timezone
 from decimal import Decimal
-
-from .models import models
 
 from .models import SavedReport, ReportExport
 from .serializers import SavedReportSerializer, ReportExportSerializer
@@ -50,7 +49,61 @@ class ReportViewSet(viewsets.GenericViewSet):
     @action(detail=False, methods=['post'], url_path='generate')
     def generate_report(self, request):
         """Generate a report"""
+        from sales.models import Sale
+        from inventory.models import PurchaseOrder
+        from products.models import Product
+
         report_type = request.data.get('report_type', 'sales')
+        account = request.data.get('account', 'sales')
+
+        if report_type == 'sales':
+            sales = Sale.objects.filter(status='completed')
+            if account == 'cashier' and request.data.get('cashier_id'):
+                sales = sales.filter(cashier_id=request.data['cashier_id'])
+            if account == 'customer' and request.data.get('customer_id'):
+                sales = sales.filter(customer_id=request.data['customer_id'])
+
+            totals = sales.aggregate(
+                total_revenue=Sum('total'),
+                transaction_count=Count('id')
+            )
+            return Response({
+                'message': 'Sales report generated',
+                'report_type': report_type,
+                'account': account,
+                'data': {
+                    'total_revenue': float(totals['total_revenue'] or 0),
+                    'transaction_count': totals['transaction_count'] or 0,
+                }
+            })
+
+        if report_type == 'inventory':
+            products = Product.objects.filter(is_active=True)
+            return Response({
+                'message': 'Inventory report generated',
+                'report_type': report_type,
+                'account': account,
+                'data': {
+                    'product_count': products.count(),
+                    'stock_value': float(sum(product.stock_value for product in products)),
+                }
+            })
+
+        if report_type == 'suppliers':
+            purchase_orders = PurchaseOrder.objects.all()
+            if request.data.get('supplier_id'):
+                purchase_orders = purchase_orders.filter(supplier_id=request.data['supplier_id'])
+            totals = purchase_orders.aggregate(total=Sum('total'), count=Count('id'))
+            return Response({
+                'message': 'Supplier report generated',
+                'report_type': report_type,
+                'account': account,
+                'data': {
+                    'purchase_order_total': float(totals['total'] or 0),
+                    'purchase_order_count': totals['count'] or 0,
+                }
+            })
+
         return Response({
             'message': f'Report {report_type} generated',
             'data': {'sample': 'data'}
@@ -74,7 +127,7 @@ class SavedReportViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         return SavedReport.objects.filter(
-           # models.Q(created_by=user) | models.Q(is_public=True)
+           models.Q(created_by=user) | models.Q(is_public=True)
         )
     
     def perform_create(self, serializer):

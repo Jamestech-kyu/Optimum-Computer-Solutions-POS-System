@@ -24,6 +24,7 @@ interface ReceiptProps {
   discount: number;
   discountAmount: number;
   tax: number;
+  taxLabel?: string;
   total: number;
   paymentMethod: string;
   cashier: string;
@@ -117,6 +118,7 @@ export function Receipt({
   discount,
   discountAmount,
   tax,
+  taxLabel,
   total,
   paymentMethod,
   cashier,
@@ -204,7 +206,7 @@ export function Receipt({
               </div>
               {item.tax > 0 && (
                 <div className="text-gray-500 text-xs ml-2">
-                  Tax: {formatCurrency(item.price * item.quantity * item.tax / 100)}
+                  Tax: {item.tax}% included
                 </div>
               )}
               {item.sku && (
@@ -270,7 +272,7 @@ export function Receipt({
           )}
           <div className="flex justify-between text-gray-600">
             <span>Tax:</span>
-            <span className="font-mono">{formatCurrency(tax)}</span>
+            <span className="font-mono">{taxLabel || `${tax}%`}</span>
           </div>
           <div className="flex justify-between text-lg font-bold bg-blue-50 p-2 rounded">
             <span>Total:</span>

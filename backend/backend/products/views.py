@@ -1,4 +1,4 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -94,6 +94,18 @@ class CategoryViewSet(viewsets.ModelViewSet):
     filterset_fields = ['is_active']
     search_fields = ['name']
 
+    def get_queryset(self):
+        queryset = Category.objects.all()
+        if self.request.query_params.get('include_inactive') == 'true':
+            return queryset
+        return queryset.filter(is_active=True)
+
+    def destroy(self, request, *args, **kwargs):
+        category = self.get_object()
+        category.is_active = False
+        category.save(update_fields=['is_active', 'updated_at'])
+        return Response({'message': f'Category {category.name} has been deactivated'}, status=status.HTTP_200_OK)
+
 
 class SupplierViewSet(viewsets.ModelViewSet):
     """ViewSet for Suppliers"""
@@ -104,6 +116,18 @@ class SupplierViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'phone']
+
+    def get_queryset(self):
+        queryset = Supplier.objects.all()
+        if self.request.query_params.get('include_inactive') == 'true':
+            return queryset
+        return queryset.filter(is_active=True)
+
+    def destroy(self, request, *args, **kwargs):
+        supplier = self.get_object()
+        supplier.is_active = False
+        supplier.save(update_fields=['is_active', 'updated_at'])
+        return Response({'message': f'Supplier {supplier.name} has been deactivated'}, status=status.HTTP_200_OK)
 
 
 class ProductViewSet(viewsets.ModelViewSet):
@@ -117,6 +141,18 @@ class ProductViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'sku', 'barcode']
     ordering_fields = ['name', 'retail_price', 'stock_quantity']
     ordering = ['name']
+
+    def get_queryset(self):
+        queryset = Product.objects.select_related('category', 'supplier')
+        if self.request.query_params.get('include_inactive') == 'true':
+            return queryset
+        return queryset.filter(is_active=True)
+
+    def destroy(self, request, *args, **kwargs):
+        product = self.get_object()
+        product.is_active = False
+        product.save(update_fields=['is_active', 'updated_at'])
+        return Response({'message': f'Product {product.name} has been deactivated'}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='low-stock')
     def low_stock(self, request):

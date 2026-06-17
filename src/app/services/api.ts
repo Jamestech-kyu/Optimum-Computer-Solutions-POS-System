@@ -1,10 +1,11 @@
-import { type CompletedSale, type DayBalance, type POSProduct } from '../components/pages/POSPageEnhanced';
+import { type CompletedSale, type DayBalance, type POSProduct, type PricingTier } from '../components/pages/POSPageEnhanced';
 import type { SupplierOrderInvoice } from '../types/supplierOrder';
 import type { AppSettings } from './settings';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 const ACCESS_TOKEN_KEY = 'pos-api-access-token';
 const REFRESH_TOKEN_KEY = 'pos-api-refresh-token';
+const API_REQUEST_TIMEOUT_MS = 30000;
 
 export interface AppBackendState {
   products: POSProduct[];
@@ -34,6 +35,7 @@ interface BackendProduct {
   base_unit_name?: string | null;
   unit?: string | null;
   price: string | number;
+  cost_price?: string | number;
   retail_price?: string | number;
   wholesale_price: string | number | null;
   carton_price?: string | number | null;
@@ -105,7 +107,7 @@ interface BackendSupplierInvoice {
   created_at?: string;
   amount: string | number;
   total?: string | number;
-  status: SupplierOrderInvoice['status'] | 'draft' | 'submitted' | 'confirmed' | 'shipped' | 'received' | 'completed' | 'cancelled' | 'returned';
+  status: SupplierOrderInvoice['status'] | 'draft' | 'submitted' | 'confirmed' | 'shipped' | 'receiving' | 'received' | 'completed' | 'cancelled' | 'returned';
   delivery_note?: string;
   tracking_number?: string;
   items: number | Array<{
@@ -120,6 +122,20 @@ interface BackendSupplierInvoice {
   }>;
   payment_method?: string;
   payment_status?: string;
+}
+
+interface BackendGoodsReceivedNote {
+  id: number;
+  grn_number: string;
+  status: 'pending' | 'verified' | 'cancelled';
+}
+
+interface BackendPurchaseOrderSendResponse {
+  message: string;
+  email: string;
+  download_url: string;
+  status: string;
+  purchase_order: BackendSupplierInvoice;
 }
 
 interface BackendAppSetting {
@@ -160,7 +176,26 @@ export interface BackendUser {
   approved_at?: string | null;
   rejected_at?: string | null;
   approval_notes?: string;
+  must_change_password?: boolean;
   last_login?: string | null;
+  shift_tracking_required?: boolean;
+  active_shift?: BackendShiftSession | null;
+  latest_shift?: BackendShiftSession | null;
+}
+
+export interface BackendShiftSession {
+  id: number;
+  user: number;
+  staff_name: string;
+  username: string;
+  started_at: string;
+  expected_end_at: string;
+  ended_at: string | null;
+  worked_seconds: number;
+  remaining_seconds: number;
+  progress_percent: number;
+  is_active: boolean;
+  is_overdue: boolean;
 }
 
 export interface BackendSupplier {
@@ -235,6 +270,7 @@ interface LoginResponse {
   user?: BackendUser;
   two_factor_required?: boolean;
   verification_code?: string;
+  must_change_password?: boolean;
   tokens?: Partial<{
     access: string;
     refresh: string;
@@ -285,6 +321,8 @@ export interface LoginResult {
   twoFactorRequired: boolean;
   verificationCode?: string;
   userRole?: string;
+  userId?: number;
+  mustChangePassword?: boolean;
 }
 
 export type RegistrationRole = 'accountant' | 'cashier' | 'storekeeper' | 'inventory_clerk' | 'manager' | 'viewer';
@@ -388,6 +426,12 @@ export interface CreateProductInput {
   minimum_stock?: number;
   maximum_stock?: number;
   supplier_sku?: string;
+  expiry_date?: string;
+  quantity_levels?: Array<{
+    quantity: number;
+    label: string;
+    prices: Partial<Record<PricingTier, number>>;
+  }>;
   tax_rate?: number;
   image_data?: string;
   notes?: string;
@@ -396,6 +440,13 @@ export interface CreateProductInput {
 export interface UpdateUserInput {
   role?: BackendRole;
   is_active?: boolean;
+}
+
+export interface ChangePasswordInput {
+  userId: number;
+  oldPassword: string;
+  newPassword: string;
+  confirmPassword: string;
 }
 
 export const getAccessToken = () => window.localStorage.getItem(ACCESS_TOKEN_KEY) || import.meta.env.VITE_API_TOKEN || '';
@@ -427,6 +478,18 @@ const readMetadataValue = (text: string | null | undefined, label: string) => {
   return match?.[1]?.trim() || undefined;
 };
 
+const readQuantityLevels = (text: string | null | undefined) => {
+  const encoded = readMetadataValue(text, 'Quantity Levels');
+  if (!encoded) return undefined;
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const buildProductMetadata = (product: CreateProductInput) => [
   product.brand ? `Brand: ${product.brand}` : '',
   (product.generic_name || product.parent_product) ? `Parent Product: ${product.generic_name || product.parent_product}` : '',
@@ -435,6 +498,7 @@ const buildProductMetadata = (product: CreateProductInput) => [
   product.model_number ? `Model: ${product.model_number}` : '',
   typeof product.corporate_price === 'number' ? `Corporate Price: ${product.corporate_price}` : '',
   typeof product.loyalty_price === 'number' ? `Loyalty Price: ${product.loyalty_price}` : '',
+  product.quantity_levels?.length ? `Quantity Levels: ${encodeURIComponent(JSON.stringify(product.quantity_levels))}` : '',
   product.notes ? `Notes: ${product.notes}` : ''
 ].filter(Boolean).join(' | ');
 
@@ -482,10 +546,13 @@ const mapProductFromApi = (product: BackendProduct): POSProduct => ({
     corporate: toNumber(readMetadataValue(product.notes, 'Corporate Price') || product.carton_price || product.wholesale_price || product.retail_price || product.price),
     loyal: toNumber(readMetadataValue(product.notes, 'Loyalty Price') || product.retail_price || product.price)
   },
+  costPrice: toNumber(product.cost_price),
   stock: toNumber(product.stock_quantity ?? product.quantity),
   reorderLevel: toNumber(product.minimum_stock ?? product.reorder_level),
   supplierId: typeof product.supplier === 'object' ? product.supplier?.id : product.supplier_id ?? product.supplier ?? undefined,
   supplierName: typeof product.supplier === 'object' ? product.supplier?.name : product.supplier_name || undefined,
+  supplierSku: product.supplier_sku || undefined,
+  quantityLevels: readQuantityLevels(product.notes) || readQuantityLevels(product.description),
   tax: toNumber(product.tax_rate),
   image: absoluteMediaUrl(product.image_data || product.image_url || product.external_image_url || product.main_image) || productPhotoFor(product)
 });
@@ -565,7 +632,7 @@ const mapSaleFromApi = (sale: BackendSale): CompletedSale => {
 
 const mapPurchaseOrderStatus = (status: BackendSupplierInvoice['status']): SupplierOrderInvoice['status'] => {
   if (status === 'received' || status === 'completed') return 'delivered';
-  if (status === 'draft' || status === 'submitted' || status === 'confirmed' || status === 'shipped') return 'requested';
+  if (status === 'draft' || status === 'submitted' || status === 'confirmed' || status === 'shipped' || status === 'receiving') return 'requested';
   return status === 'delivered' || status === 'pending' || status === 'requested' ? status : 'pending';
 };
 
@@ -577,6 +644,7 @@ const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrd
         const requestedQuantity = toNumber(item.quantity);
         const deliveredQuantity = toNumber(item.quantity_received);
         return {
+          purchaseOrderItemId: item.id,
           productId: String(item.product_id ?? item.product ?? ''),
           productName: item.product_name || 'Product',
           requestedQuantity,
@@ -591,6 +659,8 @@ const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrd
 
   return {
     id: invoice.invoice_number || invoice.po_number || `SUP-INV-${invoice.id.toString().padStart(3, '0')}`,
+    backendId: invoice.id,
+    backendStatus: invoice.status,
     supplierId: invoice.supplier_id || invoice.supplier || invoice.id,
     supplierName: invoice.supplier_name,
     contact: invoice.contact || '',
@@ -626,13 +696,94 @@ const mapNotificationFromApi = (notification: BackendNotification): BackendNotif
   };
 };
 
+type ApiErrorPayload = string | string[] | Record<string, unknown> | null | undefined;
+
+const humanizeErrorKey = (key: string) => {
+  const labels: Record<string, string> = {
+    non_field_errors: '',
+    detail: '',
+    error: '',
+    message: '',
+    username: 'Username',
+    password: 'Password',
+    email: 'Email',
+    item_id: 'Item',
+    product_id: 'Product',
+    quantity: 'Quantity'
+  };
+
+  if (key in labels) return labels[key];
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, character => character.toUpperCase());
+};
+
+const flattenApiError = (payload: ApiErrorPayload, prefix = ''): string[] => {
+  if (payload === null || payload === undefined) return [];
+  if (typeof payload === 'string') {
+    const cleanText = payload
+      .trim()
+      .replace(/^\['(.+)'\]$/, '$1')
+      .replace(/^Error:\s*/i, '');
+    return cleanText ? [`${prefix}${cleanText}`] : [];
+  }
+  if (Array.isArray(payload)) {
+    return payload.flatMap(item => flattenApiError(item as ApiErrorPayload, prefix));
+  }
+  if (typeof payload === 'object') {
+    return Object.entries(payload).flatMap(([key, value]) => {
+      const label = humanizeErrorKey(key);
+      const nextPrefix = label ? `${label}: ` : '';
+      return flattenApiError(value as ApiErrorPayload, nextPrefix);
+    });
+  }
+  return [`${prefix}${String(payload)}`];
+};
+
+const looksLikeHtml = (text: string) => /<!doctype html|<html|<body|traceback|exception/i.test(text);
+
+const formatApiErrorMessage = (text: string, fallback: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) return fallback;
+
+  try {
+    const data = JSON.parse(trimmed) as ApiErrorPayload;
+    const messages = flattenApiError(data)
+      .map(message => message.replace(/^Error:\s*/i, '').trim())
+      .filter(Boolean);
+    return messages.length > 0 ? messages.join('; ') : fallback;
+  } catch {
+    if (looksLikeHtml(trimmed)) return fallback;
+    return trimmed.replace(/^Error:\s*/i, '') || fallback;
+  }
+};
+
+const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = API_REQUEST_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('The backend took too long to respond. Please check the server and try again.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
+
 const request = async <T>(path: string, options?: RequestInit & { skipAuth?: boolean }): Promise<T> => {
   const token = getAccessToken();
   const { skipAuth, ...requestOptions } = options || {};
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...requestOptions,
       headers: {
         'Content-Type': 'application/json',
@@ -641,21 +792,12 @@ const request = async <T>(path: string, options?: RequestInit & { skipAuth?: boo
       }
     });
   } catch (error) {
-    throw new Error('Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
+    throw new Error(error instanceof Error ? error.message : 'Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
   }
 
   if (!response.ok) {
     const text = await response.text();
-    let message = text;
-
-    try {
-      const data = JSON.parse(text) as { message?: string; detail?: string; error?: string };
-      message = data.message || data.detail || data.error || text;
-    } catch {
-      message = text;
-    }
-
-    throw new Error(message || `API request failed: ${response.status} ${response.statusText}`);
+    throw new Error(formatApiErrorMessage(text, `Request failed: ${response.status} ${response.statusText}`));
   }
 
   return response.json() as Promise<T>;
@@ -700,7 +842,9 @@ export const login = async (username: string, password: string): Promise<LoginRe
     success: true,
     twoFactorRequired: Boolean(response.two_factor_required),
     verificationCode: response.verification_code,
-    userRole: response.user?.role
+    userRole: response.user?.role,
+    userId: response.user?.id,
+    mustChangePassword: Boolean(response.must_change_password || response.user?.must_change_password)
   };
 };
 
@@ -716,7 +860,13 @@ export const verifyTwoFactor = async (username: string, code: string): Promise<L
   }
 
   storeTokens(response);
-  return { success: true, twoFactorRequired: false, userRole: response.user?.role };
+  return {
+    success: true,
+    twoFactorRequired: false,
+    userRole: response.user?.role,
+    userId: response.user?.id,
+    mustChangePassword: Boolean(response.must_change_password || response.user?.must_change_password)
+  };
 };
 
 export const registerAccount = async (account: RegisterAccountInput) => {
@@ -730,8 +880,7 @@ export const registerAccount = async (account: RegisterAccountInput) => {
       confirm_password: account.password,
       phone: generatedPhone,
       role: normalizeAccountRole(account.role)
-    }),
-    skipAuth: true
+    })
   });
 
   if ('success' in response && response.success === false) {
@@ -740,6 +889,15 @@ export const registerAccount = async (account: RegisterAccountInput) => {
 
   return 'user' in response && response.user ? response.user : response as BackendUser;
 };
+
+export const changePassword = ({ userId, oldPassword, newPassword, confirmPassword }: ChangePasswordInput) => request<{ message: string }>(`/users/${userId}/change-password/`, {
+  method: 'POST',
+  body: JSON.stringify({
+    old_password: oldPassword,
+    new_password: newPassword,
+    confirm_password: confirmPassword
+  })
+});
 
 export const initiateMpesaPayment = async ({
   phoneNumber,
@@ -775,20 +933,20 @@ const requestFile = async (path: string, options?: RequestInit): Promise<Blob> =
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
       ...options,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options?.headers
       }
     });
-  } catch {
-    throw new Error('Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
   }
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `API request failed: ${response.status} ${response.statusText}`);
+    const text = await response.text();
+    throw new Error(formatApiErrorMessage(text, `Request failed: ${response.status} ${response.statusText}`));
   }
 
   return response.blob();
@@ -806,22 +964,31 @@ export const importProductsFromExcel = async (file: File): Promise<ProductExcelI
   let response: Response;
 
   try {
-    response = await fetch(`${API_BASE_URL}/products/bulk-import/`, {
+    response = await fetchWithTimeout(`${API_BASE_URL}/products/bulk-import/`, {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
       body: formData
     });
-  } catch {
-    throw new Error('Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Cannot reach the backend API. Make sure the Django server is running on http://127.0.0.1:8000.');
   }
 
-  const data = await response.json() as Partial<ProductExcelImportResult> & { message?: string; error?: string; errors?: Array<string | { row: number; message: string }> };
+  const text = await response.text();
+  let data: Partial<ProductExcelImportResult> & { message?: string; error?: string; errors?: Array<string | { row: number; message: string }> } = {};
+
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    if (!response.ok) {
+      throw new Error(formatApiErrorMessage(text, 'Products could not be imported.'));
+    }
+  }
 
   if (!response.ok) {
     const errors = data.errors?.map(error => typeof error === 'string' ? error : `Row ${error.row}: ${error.message}`).join('; ');
-    throw new Error(data.message || data.error || errors || 'Products could not be imported.');
+    throw new Error(data.message || data.error || errors || formatApiErrorMessage(text, 'Products could not be imported.'));
   }
 
   return {
@@ -929,9 +1096,8 @@ export const updateUser = (userId: number, user: UpdateUserInput) => request<Bac
   })
 });
 
-export const deactivateUser = (userId: number) => request<{ message: string }>(`/users/${userId}/toggle-active/`, {
-  method: 'POST',
-  body: JSON.stringify({})
+export const deactivateUser = (userId: number) => request<{ message: string }>(`/users/${userId}/`, {
+  method: 'DELETE'
 });
 
 export const approveUser = (userId: number) => request<BackendUser>(`/users/${userId}/approve/`, {
@@ -942,6 +1108,16 @@ export const approveUser = (userId: number) => request<BackendUser>(`/users/${us
 export const rejectUser = (userId: number, notes = '') => request<BackendUser>(`/users/${userId}/reject/`, {
   method: 'POST',
   body: JSON.stringify({ notes })
+});
+
+export const clockInUser = (userId: number) => request<BackendShiftSession>(`/users/${userId}/clock-in/`, {
+  method: 'POST',
+  body: JSON.stringify({})
+});
+
+export const clockOutUser = (userId: number) => request<BackendShiftSession>(`/users/${userId}/clock-out/`, {
+  method: 'POST',
+  body: JSON.stringify({})
 });
 
 export const createProduct = async (product: CreateProductInput) => {
@@ -968,6 +1144,7 @@ export const createProduct = async (product: CreateProductInput) => {
       category_name_input: product.category_name,
       supplier: product.supplier_id || null,
       supplier_sku: product.supplier_sku || '',
+      expiry_date: product.expiry_date || null,
       notes: metadata,
       unit: toBackendUnit(product.base_unit_name),
       tax_rate: product.tax_rate ?? 0,
@@ -990,12 +1167,39 @@ export const createSupplier = async (supplier: CreateSupplierInput) => {
     method: 'POST',
     body: JSON.stringify({
       name: supplier.name,
+      code: supplier.code || '',
+      supplier_type: supplier.supplier_type || '',
+      supplier_category: supplier.supplier_category || '',
+      registration_number: supplier.registration_number || '',
+      tax_number: supplier.tax_number || '',
+      website: supplier.website || '',
       contact_person: supplier.contact_person || '',
+      designation: supplier.designation || '',
       phone: supplier.phone || '',
+      alternate_phone: supplier.alternate_phone || '',
+      fax_number: supplier.fax_number || '',
       email: supplier.email || '',
-      address: supplier.address || '',
+      address_line1: supplier.address_line1 || supplier.address || '',
+      address_line2: supplier.address_line2 || '',
+      city: supplier.city || '',
+      county: supplier.county || '',
+      postal_code: supplier.postal_code || '',
+      country: supplier.country || 'Kenya',
+      payment_terms: supplier.payment_terms ?? 30,
+      currency: supplier.currency || 'KES',
+      credit_limit: supplier.credit_limit ?? 0,
+      preferred_payment_method: supplier.preferred_payment_method || '',
+      bank_name: supplier.bank_name || '',
+      bank_account: supplier.bank_account || '',
+      mpesa_paybill: supplier.mpesa_paybill || '',
+      mpesa_till: supplier.mpesa_till || '',
+      default_warehouse: supplier.default_warehouse || '',
+      minimum_order_amount: supplier.minimum_order_amount ?? 0,
+      lead_time_days: supplier.lead_time_days ?? 0,
+      uploaded_documents: supplier.uploaded_documents || [],
       notes: supplier.notes || '',
-      is_active: true
+      is_active: supplier.is_active ?? true,
+      is_preferred: supplier.is_preferred ?? false
     })
   });
 
@@ -1054,8 +1258,8 @@ export const saveSupplierInvoice = async (invoice: SupplierOrderInvoice) => {
       return quantity > 0 ? {
         item_id: createdItem.id,
         quantity,
-        location: 'Main Store',
-        notes: invoice.goodsReceivingNote || invoice.deliveryNote || 'Goods received'
+        location: invoice.receivingLocation || 'Main Store',
+        notes: invoice.receivingNotes || invoice.goodsReceivingNote || invoice.deliveryNote || 'Goods received'
       } : null;
     })
     .filter(Boolean);
@@ -1064,12 +1268,129 @@ export const saveSupplierInvoice = async (invoice: SupplierOrderInvoice) => {
     return mapSupplierInvoiceFromApi(response);
   }
 
-  const receiveResponse = await request<{ purchase_order: BackendSupplierInvoice }>(`/inventory/purchase-orders/${response.id}/receive/`, {
+  const receiveResponse = await request<{
+    goods_received_note: BackendGoodsReceivedNote;
+    purchase_order: BackendSupplierInvoice;
+  }>(`/inventory/purchase-orders/${response.id}/receive/`, {
     method: 'POST',
     body: JSON.stringify(receivePayload)
   });
 
-  return mapSupplierInvoiceFromApi(receiveResponse.purchase_order);
+  const verifyResponse = await request<{ purchase_order: BackendSupplierInvoice }>(
+    `/inventory/goods-received-notes/${receiveResponse.goods_received_note.id}/verify/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({})
+    }
+  );
+
+  return mapSupplierInvoiceFromApi(verifyResponse.purchase_order);
+};
+
+const ensureReceivablePurchaseOrder = async (invoice: SupplierOrderInvoice) => {
+  if (!invoice.backendId) {
+    return {
+      invoice: await saveSupplierInvoice({
+        ...invoice,
+        status: 'delivered'
+      }),
+      alreadyVerified: true
+    };
+  }
+
+  return {
+    invoice: {
+      ...invoice
+    },
+    alreadyVerified: false
+  };
+};
+
+export const receiveAndVerifySupplierInvoice = async (invoice: SupplierOrderInvoice) => {
+  const { invoice: receivableInvoice, alreadyVerified } = await ensureReceivablePurchaseOrder(invoice);
+
+  if (alreadyVerified || !receivableInvoice.backendId) {
+    return receivableInvoice;
+  }
+
+  const receivePayload = (receivableInvoice.orderItems || [])
+    .map(item => {
+      const quantity = item.deliveredQuantity || 0;
+      return item.purchaseOrderItemId && quantity > 0 ? {
+        item_id: item.purchaseOrderItemId,
+        quantity,
+        location: receivableInvoice.receivingLocation || 'Main Store',
+        notes: receivableInvoice.receivingNotes || receivableInvoice.goodsReceivingNote || receivableInvoice.deliveryNote || 'Goods received'
+      } : null;
+    })
+    .filter(Boolean);
+
+  if (receivePayload.length === 0) {
+    throw new Error('No receivable purchase order items were found for this GRN.');
+  }
+
+  const receiveResponse = await request<{
+    goods_received_note: BackendGoodsReceivedNote;
+    purchase_order: BackendSupplierInvoice;
+  }>(`/inventory/purchase-orders/${receivableInvoice.backendId}/receive/`, {
+    method: 'POST',
+    body: JSON.stringify(receivePayload)
+  });
+
+  const verifyResponse = await request<{ purchase_order: BackendSupplierInvoice }>(
+    `/inventory/goods-received-notes/${receiveResponse.goods_received_note.id}/verify/`,
+    {
+      method: 'POST',
+      body: JSON.stringify({})
+    }
+  );
+
+  return mapSupplierInvoiceFromApi(verifyResponse.purchase_order);
+};
+
+export const sendSupplierInvoiceToSupplier = async (invoice: SupplierOrderInvoice) => {
+  const invoiceItems = invoice.orderItems && invoice.orderItems.length > 0
+    ? invoice.orderItems
+    : invoice.productId ? [{
+        productId: invoice.productId,
+        productName: invoice.productName || 'Product',
+        requestedQuantity: invoice.quantityRequested || invoice.items || 1,
+        deliveredQuantity: 0,
+        pendingQuantity: invoice.quantityRequested || invoice.items || 1,
+        unitCost: invoice.quantityRequested ? invoice.amount / invoice.quantityRequested : invoice.amount
+      }] : [];
+
+  const response = await request<BackendSupplierInvoice>('/inventory/purchase-orders/', {
+    method: 'POST',
+    body: JSON.stringify({
+      supplier: invoice.supplierId,
+      status: 'draft',
+      payment_status: 'unpaid',
+      supplier_notes: invoice.contact || '',
+      internal_notes: invoice.deliveryNote || 'Created from low-stock reorder and sent to supplier',
+      order_items: invoiceItems.map(item => ({
+        product_id: Number(item.productId),
+        quantity: item.requestedQuantity,
+        unit_cost: item.unitCost,
+        notes: [
+          item.productName ? `Reorder for ${item.productName}` : 'Supplier reorder',
+          item.supplierSku ? `Supplier SKU: ${item.supplierSku}` : ''
+        ].filter(Boolean).join(' | ')
+      }))
+    })
+  });
+
+  const sendResponse = await request<BackendPurchaseOrderSendResponse>(`/inventory/purchase-orders/${response.id}/send-to-supplier/`, {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+
+  return {
+    invoice: mapSupplierInvoiceFromApi(sendResponse.purchase_order),
+    message: sendResponse.message,
+    email: sendResponse.email,
+    downloadUrl: sendResponse.download_url
+  };
 };
 
 export const loadAppSettings = async () => {

@@ -4,10 +4,9 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Checkbox } from '../ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
-import { Lock, User, Eye, EyeOff, Mail, BadgeCheck, ChevronDown, Loader2 } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { UserRole } from '../../types/auth';
-import { registerAccount } from '../../services/api';
-import type { LoginResult, RegistrationRole } from '../../services/api';
+import type { LoginResult } from '../../services/api';
 
 interface LoginPageProps {
   onLogin: (username: string, password: string, role: UserRole) => Promise<LoginResult>;
@@ -24,15 +23,6 @@ export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
   const [isResetOpen, setIsResetOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetMessage, setResetMessage] = useState('');
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createUsername, setCreateUsername] = useState('');
-  const [createEmail, setCreateEmail] = useState('');
-  const [createPassword, setCreatePassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [createRole, setCreateRole] = useState<RegistrationRole>('cashier');
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  const [createError, setCreateError] = useState('');
-  const [createMessage, setCreateMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,46 +55,6 @@ export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
       setResetEmail('');
       setResetMessage('');
     }, 2000);
-  };
-
-  const handleCreateAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreateError('');
-    setCreateMessage('');
-
-    if (createPassword !== confirmPassword) {
-      setCreateError('Passwords do not match.');
-      return;
-    }
-
-    setIsCreatingAccount(true);
-
-    try {
-      await registerAccount({
-        username: createUsername.trim(),
-        email: createEmail.trim(),
-        password: createPassword,
-        role: createRole
-      });
-
-      setEmail(createUsername.trim());
-      setPassword('');
-      setCreateMessage('Account created. An admin must approve it before login.');
-      setCreateUsername('');
-      setCreateEmail('');
-      setCreatePassword('');
-      setConfirmPassword('');
-      setCreateRole('cashier');
-      setTimeout(() => {
-        setIsCreateOpen(false);
-        setCreateMessage('');
-      }, 1600);
-    } catch (error) {
-      console.error(error);
-      setCreateError(error instanceof Error ? error.message : 'Account could not be created.');
-    } finally {
-      setIsCreatingAccount(false);
-    }
   };
 
   return (
@@ -144,7 +94,7 @@ export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
                 />
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-base font-medium text-gray-900">Password</label>
               <div className="relative">
@@ -216,157 +166,9 @@ export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
             )}
           </form>
 
-          <div className="mt-5 text-center">
-            <div className="text-lg text-gray-900">
-              Don't have an account?{' '}
-              <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-                <DialogTrigger asChild>
-                  <button type="button" className="font-semibold text-blue-950 hover:text-blue-700">
-                    Create account
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-h-[92vh] overflow-y-auto rounded-2xl border-2 border-black bg-white/95 p-8 shadow-2xl sm:max-w-xl">
-                  <DialogHeader className="sr-only">
-                    <DialogTitle>Create Account</DialogTitle>
-                  </DialogHeader>
-
-                  <div className="mx-auto mb-3 flex h-28 w-64 items-center justify-center">
-                    <div className="relative h-28 w-64">
-                      <div className="absolute left-1 top-8 h-14 w-52 rotate-[18deg] rounded-[50%] border-[4px] border-cyan-500 border-t-transparent border-r-transparent" />
-                      <div className="absolute left-6 top-3 h-20 w-52 rotate-[18deg] rounded-[50%] border-[5px] border-red-700 border-b-transparent border-l-transparent" />
-                      <span className="absolute left-20 top-8 text-6xl font-black tracking-normal text-cyan-500 drop-shadow-sm">
-                        POS
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mb-4 text-center">
-                    <h2 className="text-5xl font-black tracking-normal text-blue-950">
-                      Create Account
-                    </h2>
-                    <p className="mt-2 text-xl text-gray-900">Enter your details to register</p>
-                  </div>
-
-                  <form onSubmit={handleCreateAccount} className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-base font-medium text-gray-900">Username</label>
-                      <div className="relative">
-                        <User className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
-                        <Input
-                          type="text"
-                          value={createUsername}
-                          onChange={(e) => setCreateUsername(e.target.value)}
-                          className="h-11 rounded-md border-2 border-black bg-cyan-50 pl-12 text-base text-gray-900 shadow-inner focus-visible:ring-blue-500"
-                          placeholder="e.g., JohnDoe"
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-base font-medium text-gray-900">Email</label>
-                      <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
-                        <Input
-                          type="email"
-                          value={createEmail}
-                          onChange={(e) => setCreateEmail(e.target.value)}
-                          className="h-11 rounded-md border-2 border-black bg-cyan-50 pl-12 text-base text-gray-900 shadow-inner focus-visible:ring-blue-500"
-                          placeholder="e.g., john@email.com"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-base font-medium text-gray-900">Role</label>
-                      <div className="relative">
-                        <BadgeCheck className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
-                        <select
-                          value={createRole}
-                          onChange={(e) => setCreateRole(e.target.value as RegistrationRole)}
-                          className="h-11 w-full appearance-none rounded-md border-2 border-black bg-cyan-50 px-12 text-base text-gray-900 shadow-inner outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="accountant">Accountant</option>
-                          <option value="cashier">Cashier</option>
-                          <option value="inventory_clerk">Inventory Clerk</option>
-                          <option value="manager">Manager</option>
-                          <option value="viewer">Viewer</option>
-                        </select>
-                        <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-base font-medium text-gray-900">Password</label>
-                      <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
-                        <Input
-                          type="password"
-                          value={createPassword}
-                          onChange={(e) => setCreatePassword(e.target.value)}
-                          className="h-11 rounded-md border-2 border-black bg-cyan-50 pl-12 text-base text-gray-900 shadow-inner focus-visible:ring-blue-500"
-                          placeholder="Create a password"
-                          required
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-base font-medium text-gray-900">Confirm Password</label>
-                      <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500" />
-                        <Input
-                          type="password"
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          className="h-11 rounded-md border-2 border-black bg-cyan-50 pl-12 text-base text-gray-900 shadow-inner focus-visible:ring-blue-500"
-                          placeholder="Confirm your password"
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <div className="text-center text-lg text-gray-900">
-                      Already have an account?{' '}
-                      <button
-                        type="button"
-                        onClick={() => setIsCreateOpen(false)}
-                        className="font-semibold text-blue-950 hover:text-blue-700"
-                      >
-                        Sign in
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-center gap-4 pt-1">
-                      <div className="h-px w-32 bg-red-700" />
-                      <div className="h-3 w-3 rounded-full bg-red-700" />
-                      <div className="h-px w-32 bg-blue-950" />
-                    </div>
-
-                    {createError && (
-                      <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{createError}</p>
-                    )}
-                    {createMessage && (
-                      <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{createMessage}</p>
-                    )}
-                    <Button
-                      type="submit"
-                      className="h-12 w-full rounded-md bg-blue-600 text-lg font-semibold text-white shadow-[0_0_18px_rgba(37,99,235,0.65)] hover:bg-blue-700"
-                      disabled={isCreatingAccount}
-                    >
-                      {isCreatingAccount ? 'Creating Account...' : 'Create Account'}
-                    </Button>
-
-                    <div className="flex items-center justify-center gap-4">
-                      <div className="h-px w-32 bg-red-700" />
-                      <div className="h-3 w-3 rounded-full bg-red-700" />
-                      <div className="h-px w-32 bg-blue-950" />
-                    </div>
-
-                    <p className="text-center text-sm text-gray-900">
-                      © 2026 Sales Entry and Receipt Management System. All rights reserved.
-                    </p>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
+          <p className="mt-5 text-center text-base text-gray-900">
+            Need access? Contact an administrator to create your staff account.
+          </p>
 
           <div className="mt-5 flex items-center justify-center gap-4">
             <div className="h-px w-32 bg-red-700" />
@@ -376,7 +178,7 @@ export function LoginPage({ onLogin, onVerifyTwoFactor }: LoginPageProps) {
 
           <div className="mt-5 text-center">
             <p className="text-sm text-gray-900">
-              © 2026 Sales Entry and Receipt Management System. All rights reserved.
+              &copy; 2026 Sales Entry and Receipt Management System. All rights reserved.
             </p>
           </div>
         </CardContent>

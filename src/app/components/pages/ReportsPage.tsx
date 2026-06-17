@@ -18,6 +18,7 @@ interface ReportsPageProps {
 }
 
 type DateRange = '7days' | '30days' | '3months' | '6months' | '1year';
+type ReportAccount = 'all' | 'sales' | 'expenses' | 'suppliers' | 'inventory' | 'cash';
 
 const rangeDays: Record<DateRange, number> = {
   '7days': 7,
@@ -48,6 +49,7 @@ const shortLabel = (value: string) => value.length > 18 ? `${value.slice(0, 18)}
 
 export function ReportsPage({ products, completedSales, expenses, supplierInvoices, dayBalance }: ReportsPageProps) {
   const [dateRange, setDateRange] = useState<DateRange>('30days');
+  const [reportAccount, setReportAccount] = useState<ReportAccount>('all');
   const startDate = useMemo(() => {
     const date = new Date();
     date.setDate(date.getDate() - rangeDays[dateRange]);
@@ -158,24 +160,108 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
     { title: 'Unique Customers', value: String(uniqueCustomers), change: `${formatCurrency(outstandingSupplierBalance)} supplier balance`, icon: Users, color: 'text-orange-600', bg: 'bg-orange-500/20' }
   ];
 
-  const exportCsv = () => {
-    const rows = [
-      ['Metric', 'Value'],
-      ['Revenue', revenue.toFixed(2)],
-      ['Transactions', String(transactions)],
-      ['Average order value', averageOrderValue.toFixed(2)],
-      ['Expenses', expenseTotal.toFixed(2)],
-      ['Supplier spend', supplierSpend.toFixed(2)],
-      ['Inventory value', inventoryValue.toFixed(2)],
-      ['Cash drawer status', dayBalance.status]
-    ];
-    const csv = rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `pos-report-${shortDate(new Date())}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const accountSummaries: Record<ReportAccount, { label: string; rows: Array<[string, string]> }> = {
+    all: {
+      label: 'All Accounts',
+      rows: [
+        ['Revenue', formatCurrency(revenue)],
+        ['Transactions', String(transactions)],
+        ['Average order value', formatCurrency(averageOrderValue)],
+        ['Expenses', formatCurrency(expenseTotal)],
+        ['Supplier purchases', formatCurrency(supplierSpend)],
+        ['Inventory value', formatCurrency(inventoryValue)],
+        ['Cash drawer status', dayBalance.status === 'open' ? 'Open' : 'Closed']
+      ]
+    },
+    sales: {
+      label: 'Sales Account',
+      rows: [
+        ['Revenue', formatCurrency(revenue)],
+        ['Completed sales', String(transactions)],
+        ['Average order value', formatCurrency(averageOrderValue)],
+        ['Unique customers', String(uniqueCustomers)]
+      ]
+    },
+    expenses: {
+      label: 'Expense Account',
+      rows: [
+        ['Operating expenses', formatCurrency(expenseTotal)],
+        ['Expense records', String(filteredExpenses.length)],
+        ['Gross profit after expenses', formatCurrency(grossProfit)]
+      ]
+    },
+    suppliers: {
+      label: 'Supplier Account',
+      rows: [
+        ['Supplier purchases', formatCurrency(supplierSpend)],
+        ['Supplier invoices', String(filteredSupplierInvoices.length)],
+        ['Outstanding supplier balance', formatCurrency(outstandingSupplierBalance)]
+      ]
+    },
+    inventory: {
+      label: 'Inventory Account',
+      rows: [
+        ['Inventory value', formatCurrency(inventoryValue)],
+        ['Products tracked', String(products.length)],
+        ['Low-stock items', String(products.filter(product => product.stock <= (product.reorderLevel || 10)).length)]
+      ]
+    },
+    cash: {
+      label: 'Cash Account',
+      rows: [
+        ['Drawer status', dayBalance.status === 'open' ? 'Open' : 'Closed'],
+        ['Opening balance', formatCurrency(dayBalance.openingBalance)],
+        ['Closing balance', dayBalance.closingBalance === null ? 'Not closed' : formatCurrency(dayBalance.closingBalance)]
+      ]
+    }
+  };
+
+  const exportPdf = () => {
+    const summary = accountSummaries[reportAccount];
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!printWindow) return;
+
+    const rows = summary.rows
+      .map(([metric, value]) => `<tr><td>${metric}</td><td>${value}</td></tr>`)
+      .join('');
+    const generatedAt = new Date().toLocaleString();
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>${summary.label} Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
+            h1 { margin: 0 0 4px; font-size: 26px; }
+            p { margin: 0 0 18px; color: #4b5563; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #d1d5db; padding: 10px 12px; text-align: left; }
+            th { background: #f3f4f6; }
+            .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+            .box { border: 1px solid #d1d5db; padding: 12px; }
+            .label { color: #6b7280; font-size: 12px; text-transform: uppercase; }
+            .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
+          </style>
+        </head>
+        <body>
+          <h1>${summary.label} Report</h1>
+          <p>Generated ${generatedAt} for ${dateRange.replace('days', ' days').replace('months', ' months')}.</p>
+          <div class="meta">
+            <div class="box"><div class="label">Revenue</div><div class="value">${formatCurrency(revenue)}</div></div>
+            <div class="box"><div class="label">Expenses</div><div class="value">${formatCurrency(expenseTotal)}</div></div>
+            <div class="box"><div class="label">Profit</div><div class="value">${formatCurrency(grossProfit)}</div></div>
+          </div>
+          <table>
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   return (
@@ -186,6 +272,19 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
           <p className="text-gray-500">Business performance from live sales, expenses, purchases, and stock</p>
         </div>
         <div className="flex gap-2">
+          <Select value={reportAccount} onValueChange={(value) => setReportAccount(value as ReportAccount)}>
+            <SelectTrigger className="w-44 bg-gray-100 border-gray-200 text-gray-900">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-gray-100 border-gray-200">
+              <SelectItem value="all">All Accounts</SelectItem>
+              <SelectItem value="sales">Sales Account</SelectItem>
+              <SelectItem value="expenses">Expense Account</SelectItem>
+              <SelectItem value="suppliers">Supplier Account</SelectItem>
+              <SelectItem value="inventory">Inventory Account</SelectItem>
+              <SelectItem value="cash">Cash Account</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={dateRange} onValueChange={(value) => setDateRange(value as DateRange)}>
             <SelectTrigger className="w-40 bg-gray-100 border-gray-200 text-gray-900">
               <SelectValue />
@@ -198,12 +297,38 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
               <SelectItem value="1year">Last Year</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={exportCsv}>
+          <Button variant="outline" onClick={exportPdf}>
             <Download className="w-4 h-4 mr-2" />
-            Export CSV
+            Export PDF
           </Button>
         </div>
       </div>
+
+      <Card className="mb-6 bg-white border-gray-200">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-gray-900">{accountSummaries[reportAccount].label} Classification</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-left text-gray-500">
+                  <th className="py-2 pr-4 font-medium">Control Account</th>
+                  <th className="py-2 font-medium">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accountSummaries[reportAccount].rows.map(([metric, value]) => (
+                  <tr key={metric} className="border-b border-gray-100 last:border-0">
+                    <td className="py-2 pr-4 text-gray-700">{metric}</td>
+                    <td className="py-2 font-semibold text-gray-900">{value}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         {keyMetrics.map((metric) => {

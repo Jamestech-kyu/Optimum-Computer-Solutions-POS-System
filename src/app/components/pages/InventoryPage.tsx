@@ -21,6 +21,9 @@ import {
   CheckCircle2,
   DollarSign,
   FileText,
+  Download,
+  Edit,
+  Eye,
   History,
   ImagePlus,
   Info,
@@ -29,15 +32,16 @@ import {
   PackageCheck,
   PackageMinus,
   Plus,
-  Filter,
   Grid3X3,
   List,
+  Loader2,
   MoreVertical,
   Minus,
   RotateCcw,
   ScanLine,
   Search,
   ShoppingBag,
+  SlidersHorizontal,
   Upload,
   Users,
   X
@@ -71,6 +75,9 @@ interface InventoryPageProps {
   onDownloadAvailableItems: () => Promise<void>;
   onReorderOutOfStock: (productIds: string[]) => void;
   onCreateReorderPurchaseOrders: (items: Array<{ productId: string; quantity: number }>) => void;
+  pendingGrnRequest?: SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'> | null;
+  onCloseGrn: () => void;
+  onReceivedAndVerified: (invoice: SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'>) => Promise<void> | void;
 }
 
 type MovementKind = 'Stock In' | 'Stock Out' | 'Sale' | 'Return' | 'Transfer' | 'Adjustment' | 'Damaged Goods';
@@ -91,6 +98,7 @@ type InventoryRow = {
   available: number;
   buyingPrice: number;
   selling: number;
+  profitMargin: number;
   inventoryValue: number;
   reorderLevel: number;
   status: InventoryStatus;
@@ -123,7 +131,17 @@ type InventoryVariantSeed = {
   reorderLevel: number;
 };
 
-const unitOptions = ['pcs', 'kg', 'g', 'liter', 'ml', 'meter', 'dozen', 'box', 'pack', 'carton'];
+const unitOptions = ['pcs', 'kg', 'g', 'liter', 'ml', 'meter', 'dozen', 'box', 'pack', 'carton', 'tin', 'bag', 'pair'];
+const quantifiableUnitLabels: Record<string, { singular: string; plural: string }> = {
+  kg: { singular: 'kg', plural: 'kg' },
+  g: { singular: 'g', plural: 'g' },
+  l: { singular: 'liter', plural: 'liters' },
+  liter: { singular: 'liter', plural: 'liters' },
+  litre: { singular: 'litre', plural: 'litres' },
+  ml: { singular: 'ml', plural: 'ml' },
+  meter: { singular: 'meter', plural: 'meters' },
+  metre: { singular: 'metre', plural: 'metres' }
+};
 const movementTypes: MovementKind[] = ['Stock In', 'Stock Out', 'Sale', 'Return', 'Transfer', 'Adjustment', 'Damaged Goods'];
 const chartColors = ['#2563EB', '#059669', '#D97706', '#DC2626', '#7C3AED', '#0891B2', '#475569'];
 const chartAxisColor = '#64748B';
@@ -162,6 +180,146 @@ const seededInventoryCatalog: Array<{ family: string; aliases: string[]; variant
       { family: 'Bread', brand: 'Broadways', category: 'Bakery', itemType: 'Brown bread', size: '400g', uom: 'pcs', reorderLevel: 15 },
       { family: 'Bread', brand: 'Festive', category: 'Bakery', itemType: 'White bread', size: '600g', uom: 'pcs', reorderLevel: 12 },
       { family: 'Bread', brand: 'Supaloaf', category: 'Bakery', itemType: 'Brown bread', size: '600g', uom: 'pcs', reorderLevel: 12 }
+    ]
+  },
+  {
+    family: 'Cakes',
+    aliases: ['cake', 'birthday cake'],
+    variants: [
+      { family: 'Cakes', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Vanilla sponge cake', size: '500g', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Cakes', brand: 'Cake City', category: 'Bakery', itemType: 'Chocolate cake', size: '1kg', uom: 'pcs', reorderLevel: 4 },
+      { family: 'Cakes', brand: 'Artcaffe', category: 'Bakery', itemType: 'Black forest cake slice', size: 'slice', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Cakes', brand: 'Java House', category: 'Bakery', itemType: 'Carrot cake slice', size: 'slice', uom: 'pcs', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Pastries',
+    aliases: ['pastry', 'croissant', 'danish'],
+    variants: [
+      { family: 'Pastries', brand: 'Artcaffe', category: 'Bakery', itemType: 'Butter croissant', size: 'piece', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Pastries', brand: 'Java House', category: 'Bakery', itemType: 'Chocolate croissant', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Pastries', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Apple danish', size: 'piece', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Pastries', brand: 'Broadways', category: 'Bakery', itemType: 'Sausage roll', size: 'piece', uom: 'pcs', reorderLevel: 12 }
+    ]
+  },
+  {
+    family: 'Buns & Rolls',
+    aliases: ['buns', 'rolls', 'burger buns'],
+    variants: [
+      { family: 'Buns & Rolls', brand: 'Broadways', category: 'Bakery', itemType: 'Burger buns', size: '6 pack', uom: 'pack', reorderLevel: 10 },
+      { family: 'Buns & Rolls', brand: 'Festive', category: 'Bakery', itemType: 'Hot dog rolls', size: '6 pack', uom: 'pack', reorderLevel: 10 },
+      { family: 'Buns & Rolls', brand: 'Supaloaf', category: 'Bakery', itemType: 'Sweet buns', size: '4 pack', uom: 'pack', reorderLevel: 12 },
+      { family: 'Buns & Rolls', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Dinner rolls', size: '8 pack', uom: 'pack', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Muffins',
+    aliases: ['muffin', 'cupcake'],
+    variants: [
+      { family: 'Muffins', brand: 'Java House', category: 'Bakery', itemType: 'Blueberry muffin', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Muffins', brand: 'Artcaffe', category: 'Bakery', itemType: 'Chocolate chip muffin', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Muffins', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Vanilla cupcake', size: 'piece', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Muffins', brand: 'Cake City', category: 'Bakery', itemType: 'Red velvet cupcake', size: 'piece', uom: 'pcs', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Donuts',
+    aliases: ['doughnut', 'mandazi'],
+    variants: [
+      { family: 'Donuts', brand: 'Krispy Kreme', category: 'Bakery', itemType: 'Glazed donut', size: 'piece', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Donuts', brand: 'Java House', category: 'Bakery', itemType: 'Chocolate donut', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Donuts', brand: 'Local Bakery', category: 'Bakery', itemType: 'Mandazi', size: 'piece', uom: 'pcs', reorderLevel: 20 },
+      { family: 'Donuts', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Sugar donut', size: 'piece', uom: 'pcs', reorderLevel: 12 }
+    ]
+  },
+  {
+    family: 'Flatbreads',
+    aliases: ['chapati', 'naan', 'wraps'],
+    variants: [
+      { family: 'Flatbreads', brand: 'Local Bakery', category: 'Bakery', itemType: 'Chapati', size: '10 pack', uom: 'pack', reorderLevel: 10 },
+      { family: 'Flatbreads', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Tortilla wraps', size: '8 pack', uom: 'pack', reorderLevel: 8 },
+      { family: 'Flatbreads', brand: 'Zesta', category: 'Bakery', itemType: 'Naan bread', size: '4 pack', uom: 'pack', reorderLevel: 6 },
+      { family: 'Flatbreads', brand: 'Local Bakery', category: 'Bakery', itemType: 'Pita bread', size: '6 pack', uom: 'pack', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Cookies',
+    aliases: ['bakery cookies', 'fresh cookies'],
+    variants: [
+      { family: 'Cookies', brand: 'Artcaffe', category: 'Bakery', itemType: 'Chocolate chip cookies', size: '6 pack', uom: 'pack', reorderLevel: 8 },
+      { family: 'Cookies', brand: 'Java House', category: 'Bakery', itemType: 'Oatmeal cookies', size: '6 pack', uom: 'pack', reorderLevel: 8 },
+      { family: 'Cookies', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Butter cookies', size: '250g', uom: 'pack', reorderLevel: 8 },
+      { family: 'Cookies', brand: 'Cake City', category: 'Bakery', itemType: 'Shortbread cookies', size: '250g', uom: 'pack', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Pies & Tarts',
+    aliases: ['pies', 'tarts', 'quiche'],
+    variants: [
+      { family: 'Pies & Tarts', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Apple pie', size: 'piece', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Pies & Tarts', brand: 'Cake City', category: 'Bakery', itemType: 'Lemon tart', size: 'piece', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Pies & Tarts', brand: 'Artcaffe', category: 'Bakery', itemType: 'Chicken pie', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Pies & Tarts', brand: 'Java House', category: 'Bakery', itemType: 'Vegetable quiche', size: 'piece', uom: 'pcs', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Scones',
+    aliases: ['scone', 'tea scones'],
+    variants: [
+      { family: 'Scones', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Plain scone', size: 'piece', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Scones', brand: 'Artcaffe', category: 'Bakery', itemType: 'Raisin scone', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Scones', brand: 'Java House', category: 'Bakery', itemType: 'Cheese scone', size: 'piece', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Scones', brand: 'Local Bakery', category: 'Bakery', itemType: 'Wholemeal scone', size: 'piece', uom: 'pcs', reorderLevel: 10 }
+    ]
+  },
+  {
+    family: 'Bagels',
+    aliases: ['bagel'],
+    variants: [
+      { family: 'Bagels', brand: 'Artcaffe', category: 'Bakery', itemType: 'Plain bagel', size: 'piece', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Bagels', brand: 'Java House', category: 'Bakery', itemType: 'Sesame bagel', size: 'piece', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Bagels', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Cinnamon raisin bagel', size: 'piece', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Bagels', brand: 'Local Bakery', category: 'Bakery', itemType: 'Whole wheat bagel', size: 'piece', uom: 'pcs', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Sweet Breads',
+    aliases: ['banana bread', 'fruit loaf'],
+    variants: [
+      { family: 'Sweet Breads', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Banana bread', size: '500g', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Sweet Breads', brand: 'Cake City', category: 'Bakery', itemType: 'Fruit loaf', size: '500g', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Sweet Breads', brand: 'Java House', category: 'Bakery', itemType: 'Cinnamon loaf', size: '500g', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Sweet Breads', brand: 'Artcaffe', category: 'Bakery', itemType: 'Brioche loaf', size: '500g', uom: 'pcs', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Rusks & Toasts',
+    aliases: ['rusk', 'toast', 'melba toast'],
+    variants: [
+      { family: 'Rusks & Toasts', brand: 'Broadways', category: 'Bakery', itemType: 'Milk rusks', size: '250g', uom: 'pack', reorderLevel: 8 },
+      { family: 'Rusks & Toasts', brand: 'Festive', category: 'Bakery', itemType: 'Tea rusks', size: '250g', uom: 'pack', reorderLevel: 8 },
+      { family: 'Rusks & Toasts', brand: 'Supaloaf', category: 'Bakery', itemType: 'Garlic toast', size: '200g', uom: 'pack', reorderLevel: 6 },
+      { family: 'Rusks & Toasts', brand: 'Local Bakery', category: 'Bakery', itemType: 'Melba toast', size: '200g', uom: 'pack', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Specialty Breads',
+    aliases: ['sourdough', 'ciabatta', 'baguette'],
+    variants: [
+      { family: 'Specialty Breads', brand: 'Artcaffe', category: 'Bakery', itemType: 'Sourdough loaf', size: '700g', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Specialty Breads', brand: 'Java House', category: 'Bakery', itemType: 'Baguette', size: 'piece', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Specialty Breads', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Ciabatta loaf', size: '500g', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Specialty Breads', brand: 'Local Bakery', category: 'Bakery', itemType: 'Multigrain loaf', size: '600g', uom: 'pcs', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Savory Bakes',
+    aliases: ['samosa', 'meat pie', 'savory pastry'],
+    variants: [
+      { family: 'Savory Bakes', brand: 'Local Bakery', category: 'Bakery', itemType: 'Beef samosa', size: 'piece', uom: 'pcs', reorderLevel: 20 },
+      { family: 'Savory Bakes', brand: 'Blueberry Bakery', category: 'Bakery', itemType: 'Chicken samosa', size: 'piece', uom: 'pcs', reorderLevel: 16 },
+      { family: 'Savory Bakes', brand: 'Artcaffe', category: 'Bakery', itemType: 'Spinach feta pastry', size: 'piece', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Savory Bakes', brand: 'Java House', category: 'Bakery', itemType: 'Mini meat pie', size: 'piece', uom: 'pcs', reorderLevel: 12 }
     ]
   },
   {
@@ -263,6 +421,316 @@ const seededInventoryCatalog: Array<{ family: string; aliases: string[]; variant
       { family: 'Toothpaste', brand: 'Closeup', category: 'Personal Care', itemType: 'Red hot gel', size: '125ml', uom: 'pcs', reorderLevel: 12 },
       { family: 'Toothpaste', brand: 'Aquafresh', category: 'Personal Care', itemType: 'Triple protection', size: '100ml', uom: 'pcs', reorderLevel: 10 }
     ]
+  },
+  {
+    family: 'Coffee',
+    aliases: ['kahawa', 'instant coffee'],
+    variants: [
+      { family: 'Coffee', brand: 'Nescafe', category: 'Beverages', itemType: 'Instant coffee', size: '50g', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Coffee', brand: 'Dormans', category: 'Beverages', itemType: 'Ground coffee', size: '250g', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Coffee', brand: 'Java House', category: 'Beverages', itemType: 'House blend coffee', size: '250g', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Coffee', brand: 'Kericho Gold', category: 'Beverages', itemType: 'Kenyan coffee', size: '250g', uom: 'pcs', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Juice',
+    aliases: ['fruit juice', 'squash'],
+    variants: [
+      { family: 'Juice', brand: 'Del Monte', category: 'Beverages', itemType: 'Pineapple juice', size: '1L', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Juice', brand: 'Minute Maid', category: 'Beverages', itemType: 'Mango juice', size: '400ml', uom: 'pcs', reorderLevel: 18 },
+      { family: 'Juice', brand: 'Afia', category: 'Beverages', itemType: 'Mixed fruit juice', size: '1L', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Juice', brand: 'Quencher', category: 'Beverages', itemType: 'Apple juice', size: '1L', uom: 'pcs', reorderLevel: 10 }
+    ]
+  },
+  {
+    family: 'Biscuits',
+    aliases: ['cookies', 'crackers'],
+    variants: [
+      { family: 'Biscuits', brand: 'Britania', category: 'Snacks', itemType: 'Digestive biscuits', size: '250g', uom: 'pcs', reorderLevel: 18 },
+      { family: 'Biscuits', brand: 'Manji', category: 'Snacks', itemType: 'Shortcake biscuits', size: '200g', uom: 'pcs', reorderLevel: 16 },
+      { family: 'Biscuits', brand: 'Oreo', category: 'Snacks', itemType: 'Chocolate sandwich cookies', size: '154g', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Biscuits', brand: 'Tiffany', category: 'Snacks', itemType: 'Cream biscuits', size: '100g', uom: 'pcs', reorderLevel: 18 }
+    ]
+  },
+  {
+    family: 'Chips',
+    aliases: ['crisps', 'potato chips'],
+    variants: [
+      { family: 'Chips', brand: 'Krackles', category: 'Snacks', itemType: 'Potato crisps salted', size: '40g', uom: 'pcs', reorderLevel: 24 },
+      { family: 'Chips', brand: 'Tropical Heat', category: 'Snacks', itemType: 'Potato crisps chilli lemon', size: '40g', uom: 'pcs', reorderLevel: 24 },
+      { family: 'Chips', brand: 'Pringles', category: 'Snacks', itemType: 'Original crisps', size: '165g', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Chips', brand: 'Blue Band', category: 'Snacks', itemType: 'Corn snacks', size: '50g', uom: 'pcs', reorderLevel: 18 }
+    ]
+  },
+  {
+    family: 'Chocolate',
+    aliases: ['candy', 'sweets'],
+    variants: [
+      { family: 'Chocolate', brand: 'Cadbury', category: 'Confectionery', itemType: 'Dairy milk chocolate', size: '80g', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Chocolate', brand: 'Mars', category: 'Confectionery', itemType: 'Chocolate bar', size: '51g', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Chocolate', brand: 'Snickers', category: 'Confectionery', itemType: 'Peanut chocolate bar', size: '50g', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Chocolate', brand: 'Kinder Joy', category: 'Confectionery', itemType: 'Chocolate egg', size: '20g', uom: 'pcs', reorderLevel: 10 }
+    ]
+  },
+  {
+    family: 'Fresh Vegetables',
+    aliases: ['mboga', 'vegetables'],
+    variants: [
+      { family: 'Fresh Vegetables', brand: 'Local Farm', category: 'Produce', itemType: 'Tomatoes', size: '1kg', uom: 'kg', reorderLevel: 15 },
+      { family: 'Fresh Vegetables', brand: 'Local Farm', category: 'Produce', itemType: 'Onions', size: '1kg', uom: 'kg', reorderLevel: 15 },
+      { family: 'Fresh Vegetables', brand: 'Local Farm', category: 'Produce', itemType: 'Sukuma wiki', size: 'bundle', uom: 'pcs', reorderLevel: 20 },
+      { family: 'Fresh Vegetables', brand: 'Local Farm', category: 'Produce', itemType: 'Cabbage', size: 'head', uom: 'pcs', reorderLevel: 12 }
+    ]
+  },
+  {
+    family: 'Fresh Fruits',
+    aliases: ['matunda', 'fruit'],
+    variants: [
+      { family: 'Fresh Fruits', brand: 'Local Farm', category: 'Produce', itemType: 'Bananas', size: '1kg', uom: 'kg', reorderLevel: 20 },
+      { family: 'Fresh Fruits', brand: 'Local Farm', category: 'Produce', itemType: 'Oranges', size: '1kg', uom: 'kg', reorderLevel: 15 },
+      { family: 'Fresh Fruits', brand: 'Local Farm', category: 'Produce', itemType: 'Apples', size: '1kg', uom: 'kg', reorderLevel: 12 },
+      { family: 'Fresh Fruits', brand: 'Local Farm', category: 'Produce', itemType: 'Avocado', size: 'piece', uom: 'pcs', reorderLevel: 20 }
+    ]
+  },
+  {
+    family: 'Meat',
+    aliases: ['nyama', 'butchery'],
+    variants: [
+      { family: 'Meat', brand: 'Farm Fresh', category: 'Butchery', itemType: 'Beef steak', size: '1kg', uom: 'kg', reorderLevel: 8 },
+      { family: 'Meat', brand: 'Farm Fresh', category: 'Butchery', itemType: 'Goat meat', size: '1kg', uom: 'kg', reorderLevel: 6 },
+      { family: 'Meat', brand: 'Blue Nile', category: 'Butchery', itemType: 'Chicken broiler', size: '1kg', uom: 'kg', reorderLevel: 8 },
+      { family: 'Meat', brand: 'Farmer Choice', category: 'Butchery', itemType: 'Sausages', size: '500g', uom: 'pack', reorderLevel: 10 }
+    ]
+  },
+  {
+    family: 'Frozen Foods',
+    aliases: ['frozen', 'freezer'],
+    variants: [
+      { family: 'Frozen Foods', brand: 'Blue Band', category: 'Frozen Foods', itemType: 'Frozen chips', size: '1kg', uom: 'pack', reorderLevel: 10 },
+      { family: 'Frozen Foods', brand: 'Kenchic', category: 'Frozen Foods', itemType: 'Chicken nuggets', size: '500g', uom: 'pack', reorderLevel: 8 },
+      { family: 'Frozen Foods', brand: 'Farmer Choice', category: 'Frozen Foods', itemType: 'Burger patties', size: '500g', uom: 'pack', reorderLevel: 8 },
+      { family: 'Frozen Foods', brand: 'Ocean Catch', category: 'Frozen Foods', itemType: 'Fish fillets', size: '1kg', uom: 'pack', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Cereals',
+    aliases: ['grains', 'breakfast cereal'],
+    variants: [
+      { family: 'Cereals', brand: 'Weetabix', category: 'Breakfast', itemType: 'Wheat cereal', size: '450g', uom: 'box', reorderLevel: 8 },
+      { family: 'Cereals', brand: 'Kelloggs', category: 'Breakfast', itemType: 'Corn flakes', size: '500g', uom: 'box', reorderLevel: 8 },
+      { family: 'Cereals', brand: 'Nestle', category: 'Breakfast', itemType: 'Milo cereal', size: '330g', uom: 'box', reorderLevel: 8 },
+      { family: 'Cereals', brand: 'Proctor & Allan', category: 'Breakfast', itemType: 'Porridge oats', size: '500g', uom: 'pcs', reorderLevel: 10 }
+    ]
+  },
+  {
+    family: 'Spices',
+    aliases: ['seasoning', 'masala'],
+    variants: [
+      { family: 'Spices', brand: 'Tropical Heat', category: 'Food', itemType: 'Pilau masala', size: '100g', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Spices', brand: 'Royco', category: 'Food', itemType: 'Mchuzi mix', size: '200g', uom: 'pcs', reorderLevel: 20 },
+      { family: 'Spices', brand: "Nature's Own", category: 'Food', itemType: 'Black pepper', size: '50g', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Spices', brand: 'Blue Band', category: 'Food', itemType: 'Table salt', size: '1kg', uom: 'pcs', reorderLevel: 16 }
+    ]
+  },
+  {
+    family: 'Baby Diapers',
+    aliases: ['diapers', 'nappies'],
+    variants: [
+      { family: 'Baby Diapers', brand: 'Pampers', category: 'Baby Care', itemType: 'Baby dry diapers', size: 'Size 3', uom: 'pack', reorderLevel: 8 },
+      { family: 'Baby Diapers', brand: 'Huggies', category: 'Baby Care', itemType: 'Dry comfort diapers', size: 'Size 4', uom: 'pack', reorderLevel: 8 },
+      { family: 'Baby Diapers', brand: 'Molfix', category: 'Baby Care', itemType: 'Baby diapers', size: 'Size 5', uom: 'pack', reorderLevel: 8 },
+      { family: 'Baby Diapers', brand: 'Softcare', category: 'Baby Care', itemType: 'Baby diapers', size: 'Size 2', uom: 'pack', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Baby Food',
+    aliases: ['infant food', 'formula'],
+    variants: [
+      { family: 'Baby Food', brand: 'Nestle Cerelac', category: 'Baby Care', itemType: 'Wheat baby cereal', size: '400g', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Baby Food', brand: 'Nan', category: 'Baby Care', itemType: 'Infant formula', size: '400g', uom: 'tin', reorderLevel: 8 },
+      { family: 'Baby Food', brand: 'SMA', category: 'Baby Care', itemType: 'Infant milk', size: '400g', uom: 'tin', reorderLevel: 6 },
+      { family: 'Baby Food', brand: 'Cow & Gate', category: 'Baby Care', itemType: 'Follow-on milk', size: '400g', uom: 'tin', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Hair Care',
+    aliases: ['shampoo', 'conditioner'],
+    variants: [
+      { family: 'Hair Care', brand: 'Nice & Lovely', category: 'Beauty & Cosmetics', itemType: 'Hair shampoo', size: '250ml', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Hair Care', brand: 'Sofnfree', category: 'Beauty & Cosmetics', itemType: 'Hair food', size: '125g', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Hair Care', brand: 'Dark and Lovely', category: 'Beauty & Cosmetics', itemType: 'Relaxer kit', size: 'regular', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Hair Care', brand: 'Cantu', category: 'Beauty & Cosmetics', itemType: 'Leave-in conditioner', size: '340g', uom: 'pcs', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Skin Care',
+    aliases: ['lotion', 'cream'],
+    variants: [
+      { family: 'Skin Care', brand: 'Nivea', category: 'Beauty & Cosmetics', itemType: 'Body lotion', size: '400ml', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Skin Care', brand: 'Vaseline', category: 'Beauty & Cosmetics', itemType: 'Petroleum jelly', size: '250ml', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Skin Care', brand: 'Garnier', category: 'Beauty & Cosmetics', itemType: 'Face wash', size: '100ml', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Skin Care', brand: 'Neutrogena', category: 'Beauty & Cosmetics', itemType: 'Moisturizer', size: '50ml', uom: 'pcs', reorderLevel: 6 }
+    ]
+  },
+  {
+    family: 'Stationery',
+    aliases: ['school supplies', 'office supplies'],
+    variants: [
+      { family: 'Stationery', brand: 'Bic', category: 'Stationery', itemType: 'Ballpoint pens', size: 'box of 50', uom: 'box', reorderLevel: 5 },
+      { family: 'Stationery', brand: 'Kasuku', category: 'Stationery', itemType: 'Exercise books', size: '200 pages', uom: 'pcs', reorderLevel: 30 },
+      { family: 'Stationery', brand: 'Pelikan', category: 'Stationery', itemType: 'Pencils', size: 'box of 12', uom: 'box', reorderLevel: 8 },
+      { family: 'Stationery', brand: 'Faber-Castell', category: 'Stationery', itemType: 'Colored pencils', size: '12 colors', uom: 'pack', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Paper Products',
+    aliases: ['paper', 'printing paper'],
+    variants: [
+      { family: 'Paper Products', brand: 'Double A', category: 'Stationery', itemType: 'A4 copy paper', size: 'ream', uom: 'pack', reorderLevel: 10 },
+      { family: 'Paper Products', brand: 'Mondial', category: 'Stationery', itemType: 'A4 copy paper', size: 'ream', uom: 'pack', reorderLevel: 10 },
+      { family: 'Paper Products', brand: 'Velvex', category: 'Household', itemType: 'Paper towels', size: '2 rolls', uom: 'pack', reorderLevel: 12 },
+      { family: 'Paper Products', brand: 'Rosy', category: 'Household', itemType: 'Toilet tissue', size: '10 rolls', uom: 'pack', reorderLevel: 16 }
+    ]
+  },
+  {
+    family: 'Mobile Phones',
+    aliases: ['phones', 'smartphones'],
+    variants: [
+      { family: 'Mobile Phones', brand: 'Samsung', category: 'Electronics', itemType: 'Android smartphone', size: '128GB', uom: 'pcs', reorderLevel: 3 },
+      { family: 'Mobile Phones', brand: 'Apple', category: 'Electronics', itemType: 'iPhone', size: '128GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Mobile Phones', brand: 'Tecno', category: 'Electronics', itemType: 'Android smartphone', size: '64GB', uom: 'pcs', reorderLevel: 5 },
+      { family: 'Mobile Phones', brand: 'Infinix', category: 'Electronics', itemType: 'Android smartphone', size: '128GB', uom: 'pcs', reorderLevel: 5 }
+    ]
+  },
+  {
+    family: 'Computers',
+    aliases: ['laptops', 'desktop computers'],
+    variants: [
+      { family: 'Computers', brand: 'HP', category: 'Electronics', itemType: 'Laptop computer', size: 'Core i5 8GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Computers', brand: 'Dell', category: 'Electronics', itemType: 'Laptop computer', size: 'Core i7 16GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Computers', brand: 'Lenovo', category: 'Electronics', itemType: 'Business laptop', size: 'Core i5 8GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Computers', brand: 'Asus', category: 'Electronics', itemType: 'Notebook laptop', size: 'Core i3 4GB', uom: 'pcs', reorderLevel: 2 }
+    ]
+  },
+  {
+    family: 'Computer Accessories',
+    aliases: ['keyboard', 'mouse', 'accessories'],
+    variants: [
+      { family: 'Computer Accessories', brand: 'Logitech', category: 'Electronics', itemType: 'Wireless mouse', size: 'standard', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Computer Accessories', brand: 'HP', category: 'Electronics', itemType: 'USB keyboard', size: 'standard', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Computer Accessories', brand: 'Sandisk', category: 'Electronics', itemType: 'USB flash drive', size: '64GB', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Computer Accessories', brand: 'Seagate', category: 'Electronics', itemType: 'External hard drive', size: '1TB', uom: 'pcs', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Televisions',
+    aliases: ['tv', 'smart tv'],
+    variants: [
+      { family: 'Televisions', brand: 'Samsung', category: 'Appliances', itemType: 'Smart LED TV', size: '43 inch', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Televisions', brand: 'LG', category: 'Appliances', itemType: 'Smart LED TV', size: '55 inch', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Televisions', brand: 'Sony', category: 'Appliances', itemType: 'Android TV', size: '50 inch', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Televisions', brand: 'Hisense', category: 'Appliances', itemType: 'Smart TV', size: '43 inch', uom: 'pcs', reorderLevel: 2 }
+    ]
+  },
+  {
+    family: 'Kitchen Appliances',
+    aliases: ['kitchen electronics', 'small appliances'],
+    variants: [
+      { family: 'Kitchen Appliances', brand: 'Ramtons', category: 'Appliances', itemType: 'Microwave oven', size: '20L', uom: 'pcs', reorderLevel: 3 },
+      { family: 'Kitchen Appliances', brand: 'Von', category: 'Appliances', itemType: 'Blender', size: '1.5L', uom: 'pcs', reorderLevel: 4 },
+      { family: 'Kitchen Appliances', brand: 'Bruhm', category: 'Appliances', itemType: 'Electric kettle', size: '1.7L', uom: 'pcs', reorderLevel: 5 },
+      { family: 'Kitchen Appliances', brand: 'Philips', category: 'Appliances', itemType: 'Air fryer', size: '4L', uom: 'pcs', reorderLevel: 3 }
+    ]
+  },
+  {
+    family: 'Cleaning Liquids',
+    aliases: ['cleaners', 'disinfectant'],
+    variants: [
+      { family: 'Cleaning Liquids', brand: 'Jik', category: 'Household', itemType: 'Bleach', size: '750ml', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Cleaning Liquids', brand: 'Harpic', category: 'Household', itemType: 'Toilet cleaner', size: '500ml', uom: 'pcs', reorderLevel: 12 },
+      { family: 'Cleaning Liquids', brand: 'Dettol', category: 'Household', itemType: 'Disinfectant', size: '500ml', uom: 'pcs', reorderLevel: 10 },
+      { family: 'Cleaning Liquids', brand: 'Mr Muscle', category: 'Household', itemType: 'Surface cleaner', size: '500ml', uom: 'pcs', reorderLevel: 8 }
+    ]
+  },
+  {
+    family: 'Paint',
+    aliases: ['wall paint', 'decor paint'],
+    variants: [
+      { family: 'Paint', brand: 'Crown', category: 'Hardware', itemType: 'Emulsion paint', size: '4L', uom: 'pcs', reorderLevel: 4 },
+      { family: 'Paint', brand: 'Basco', category: 'Hardware', itemType: 'Gloss paint', size: '1L', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Paint', brand: 'Sadolin', category: 'Hardware', itemType: 'Weather guard paint', size: '4L', uom: 'pcs', reorderLevel: 4 },
+      { family: 'Paint', brand: 'Duracoat', category: 'Hardware', itemType: 'Silk vinyl paint', size: '4L', uom: 'pcs', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Tools',
+    aliases: ['hand tools', 'hardware tools'],
+    variants: [
+      { family: 'Tools', brand: 'Stanley', category: 'Hardware', itemType: 'Hammer', size: '16oz', uom: 'pcs', reorderLevel: 5 },
+      { family: 'Tools', brand: 'Bosch', category: 'Hardware', itemType: 'Drill machine', size: '650W', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Tools', brand: 'Total', category: 'Hardware', itemType: 'Screwdriver set', size: '6 pcs', uom: 'pack', reorderLevel: 4 },
+      { family: 'Tools', brand: 'Ingco', category: 'Hardware', itemType: 'Spanner set', size: '12 pcs', uom: 'pack', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Car Care',
+    aliases: ['automotive', 'vehicle care'],
+    variants: [
+      { family: 'Car Care', brand: 'Shell', category: 'Automotive', itemType: 'Engine oil', size: '4L', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Car Care', brand: 'TotalEnergies', category: 'Automotive', itemType: 'Engine oil', size: '4L', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Car Care', brand: 'Castrol', category: 'Automotive', itemType: 'Brake fluid', size: '500ml', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Car Care', brand: 'Turtle Wax', category: 'Automotive', itemType: 'Car polish', size: '500ml', uom: 'pcs', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Pet Food',
+    aliases: ['dog food', 'cat food'],
+    variants: [
+      { family: 'Pet Food', brand: 'Pedigree', category: 'Pet Supplies', itemType: 'Dog food', size: '1kg', uom: 'pack', reorderLevel: 6 },
+      { family: 'Pet Food', brand: 'Whiskas', category: 'Pet Supplies', itemType: 'Cat food', size: '1kg', uom: 'pack', reorderLevel: 6 },
+      { family: 'Pet Food', brand: 'Drools', category: 'Pet Supplies', itemType: 'Puppy food', size: '3kg', uom: 'pack', reorderLevel: 4 },
+      { family: 'Pet Food', brand: 'Reflex', category: 'Pet Supplies', itemType: 'Kitten food', size: '1.5kg', uom: 'pack', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Fertilizer',
+    aliases: ['farm inputs', 'plant food'],
+    variants: [
+      { family: 'Fertilizer', brand: 'MEA', category: 'Agriculture', itemType: 'DAP fertilizer', size: '50kg', uom: 'bag', reorderLevel: 4 },
+      { family: 'Fertilizer', brand: 'Yara', category: 'Agriculture', itemType: 'NPK fertilizer', size: '50kg', uom: 'bag', reorderLevel: 4 },
+      { family: 'Fertilizer', brand: 'Osho', category: 'Agriculture', itemType: 'Foliar feed', size: '1L', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Fertilizer', brand: 'Elgon Kenya', category: 'Agriculture', itemType: 'CAN fertilizer', size: '50kg', uom: 'bag', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Clothing',
+    aliases: ['apparel', 'wear'],
+    variants: [
+      { family: 'Clothing', brand: 'LC Waikiki', category: 'Apparel', itemType: 'T-shirt', size: 'Medium', uom: 'pcs', reorderLevel: 8 },
+      { family: 'Clothing', brand: 'Mr Price', category: 'Apparel', itemType: 'Jeans', size: '32', uom: 'pcs', reorderLevel: 6 },
+      { family: 'Clothing', brand: 'Nike', category: 'Apparel', itemType: 'Sports jersey', size: 'Large', uom: 'pcs', reorderLevel: 4 },
+      { family: 'Clothing', brand: 'Adidas', category: 'Apparel', itemType: 'Track pants', size: 'Large', uom: 'pcs', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Footwear',
+    aliases: ['shoes', 'sandals'],
+    variants: [
+      { family: 'Footwear', brand: 'Bata', category: 'Footwear', itemType: 'School shoes', size: 'Size 6', uom: 'pair', reorderLevel: 6 },
+      { family: 'Footwear', brand: 'Nike', category: 'Footwear', itemType: 'Running shoes', size: 'Size 8', uom: 'pair', reorderLevel: 4 },
+      { family: 'Footwear', brand: 'Adidas', category: 'Footwear', itemType: 'Sneakers', size: 'Size 9', uom: 'pair', reorderLevel: 4 },
+      { family: 'Footwear', brand: 'Safari Boots', category: 'Footwear', itemType: 'Leather boots', size: 'Size 7', uom: 'pair', reorderLevel: 4 }
+    ]
+  },
+  {
+    family: 'Furniture',
+    aliases: ['chairs', 'tables'],
+    variants: [
+      { family: 'Furniture', brand: 'Victoria Courts', category: 'Furniture', itemType: 'Office chair', size: 'standard', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Furniture', brand: 'Odds & Ends', category: 'Furniture', itemType: 'Coffee table', size: 'medium', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Furniture', brand: 'Furniture Palace', category: 'Furniture', itemType: 'Sofa set', size: '5 seater', uom: 'pcs', reorderLevel: 1 },
+      { family: 'Furniture', brand: 'Dignity Furniture', category: 'Furniture', itemType: 'Wardrobe', size: '3 door', uom: 'pcs', reorderLevel: 1 }
+    ]
   }
 ];
 
@@ -298,6 +766,15 @@ const blankAddItemForm = {
   productStatus: 'active',
   publishToPos: true,
   trackExpiry: false,
+  expiryDate: '',
+  quantityLevels: [] as Array<{
+    quantity: string;
+    label: string;
+    retailPrice: string;
+    wholesalePrice: string;
+    corporatePrice: string;
+    loyalPrice: string;
+  }>,
   warrantyPeriod: '',
   productType: '',
   imageUrl: '',
@@ -312,6 +789,60 @@ const getReorderLevel = (product: POSProduct) => {
 
 const normalizeSeedSearch = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ');
 
+const normalizeUnit = (unit: string) => unit.trim().toLowerCase();
+
+const isQuantifiableUnit = (unit: string) => Boolean(quantifiableUnitLabels[normalizeUnit(unit)]);
+
+const formatQuantityLevel = (quantity: number, unit: string) => {
+  const unitLabel = quantifiableUnitLabels[normalizeUnit(unit)];
+  if (!unitLabel) return `${quantity} ${unit}`;
+  return `${quantity} ${quantity === 1 ? unitLabel.singular : unitLabel.plural}`;
+};
+
+const calculateTaxInclusivePrice = (price: string, previousTax: string, nextTax: string) => {
+  const amount = Number(price);
+  if (!Number.isFinite(amount) || amount <= 0) return price;
+
+  const previousMultiplier = 1 + ((Number(previousTax) || 0) / 100);
+  const nextMultiplier = 1 + ((Number(nextTax) || 0) / 100);
+  return ((amount / previousMultiplier) * nextMultiplier).toFixed(2);
+};
+
+const applyTaxToPriceFields = <T extends {
+  retailPrice: string;
+  wholesalePrice: string;
+  corporatePrice: string;
+  loyalPrice: string;
+}>(priceFields: T, previousTax: string, nextTax: string): T => ({
+  ...priceFields,
+  retailPrice: calculateTaxInclusivePrice(priceFields.retailPrice, previousTax, nextTax),
+  wholesalePrice: calculateTaxInclusivePrice(priceFields.wholesalePrice, previousTax, nextTax),
+  corporatePrice: calculateTaxInclusivePrice(priceFields.corporatePrice, previousTax, nextTax),
+  loyalPrice: calculateTaxInclusivePrice(priceFields.loyalPrice, previousTax, nextTax)
+});
+
+const createQuantityLevel = (quantity: number, unit: string, prices: {
+  retailPrice: string;
+  wholesalePrice: string;
+  corporatePrice: string;
+  loyalPrice: string;
+}) => {
+  const label = formatQuantityLevel(quantity, unit);
+  const priceFor = (value: string) => {
+    const amount = Number(value);
+    return Number.isFinite(amount) && amount > 0 ? (amount * quantity).toFixed(2) : '';
+  };
+
+  return {
+    quantity: String(quantity),
+    label,
+    retailPrice: priceFor(prices.retailPrice),
+    wholesalePrice: priceFor(prices.wholesalePrice || prices.retailPrice),
+    corporatePrice: priceFor(prices.corporatePrice || prices.wholesalePrice || prices.retailPrice),
+    loyalPrice: priceFor(prices.loyalPrice || prices.retailPrice)
+  };
+};
+
 const createSeedSku = (seed: InventoryVariantSeed) => (
   [seed.family, seed.brand, seed.itemType, seed.size, seed.packSize]
     .filter(Boolean)
@@ -321,6 +852,84 @@ const createSeedSku = (seed: InventoryVariantSeed) => (
     .replace(/^-|-$/g, '')
     .slice(0, 32)
 );
+
+const getSeededVariants = (category?: string, family?: string) => seededInventoryCatalog
+  .flatMap(catalog => catalog.variants)
+  .filter(seed => (!category || seed.category === category) && (!family || seed.family === family));
+
+const uniqueSorted = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right));
+
+const buildSeedCategoryMap = () => seededInventoryCatalog.reduce((categoryMap, catalog) => {
+  catalog.variants.forEach(seed => {
+    const subcategories = categoryMap.get(seed.category) || new Set<string>();
+    subcategories.add(catalog.family);
+    categoryMap.set(seed.category, subcategories);
+  });
+  return categoryMap;
+}, new Map<string, Set<string>>());
+
+function SearchableSeedSelect({
+  value,
+  options,
+  placeholder,
+  onChange
+}: {
+  value: string;
+  options: string[];
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState('');
+  const filteredOptions = options.filter(option =>
+    option.toLowerCase().includes(searchValue.trim().toLowerCase())
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="flex h-9 w-full items-center justify-between rounded-md border border-gray-200 bg-gray-100 px-3 text-left text-sm text-gray-900"
+        onClick={() => setIsOpen(previous => !previous)}
+      >
+        <span className={value ? 'truncate' : 'truncate text-gray-500'}>{value || placeholder}</span>
+        <Search className="ml-2 h-4 w-4 shrink-0 text-gray-400" />
+      </button>
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-gray-200 bg-white p-2 shadow-xl">
+          <div className="relative mb-2">
+            <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              autoFocus
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              placeholder="Search..."
+              className="h-9 w-full rounded-md border border-gray-200 bg-gray-50 pl-8 pr-3 text-sm outline-none focus:border-blue-400"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {filteredOptions.length === 0 ? (
+              <p className="px-2 py-2 text-sm text-gray-500">No matches found</p>
+            ) : filteredOptions.map(option => (
+              <button
+                key={option}
+                type="button"
+                className={`w-full rounded px-2 py-2 text-left text-sm hover:bg-blue-50 ${option === value ? 'bg-blue-600 text-white hover:bg-blue-600' : 'text-gray-700'}`}
+                onClick={() => {
+                  onChange(option);
+                  setSearchValue('');
+                  setIsOpen(false);
+                }}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const buildInventoryItemName = (item: typeof blankAddItemForm) => {
   if (item.name.trim()) return item.name.trim();
@@ -377,12 +986,17 @@ export function InventoryPage({
   onDownloadImportTemplate,
   onDownloadAvailableItems,
   onReorderOutOfStock,
-  onCreateReorderPurchaseOrders
+  onCreateReorderPurchaseOrders,
+  pendingGrnRequest,
+  onCloseGrn,
+  onReceivedAndVerified
 }: InventoryPageProps) {
   const [movementFilter, setMovementFilter] = useState('all');
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<InventoryNotification[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isMoreFiltersOpen, setIsMoreFiltersOpen] = useState(false);
+  const [actionProductId, setActionProductId] = useState<string | null>(null);
   const [adjustmentType, setAdjustmentType] = useState<'in' | 'out' | null>(null);
   const [adjustmentForm, setAdjustmentForm] = useState({ productId: '', quantity: '1', reason: '' });
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
@@ -405,6 +1019,14 @@ export function InventoryPage({
   const [isExportDownloading, setIsExportDownloading] = useState(false);
   const [selectedReorderItems, setSelectedReorderItems] = useState<string[]>([]);
   const [reorderQuantities, setReorderQuantities] = useState<Record<string, string>>({});
+  const [grnReceivedQuantities, setGrnReceivedQuantities] = useState<Record<string, string>>({});
+  const [grnDetails, setGrnDetails] = useState({
+    goodsReceivingNote: '',
+    deliveryNote: '',
+    receivingLocation: 'Main Store',
+    receivingNotes: ''
+  });
+  const [isPostingGrn, setIsPostingGrn] = useState(false);
   const [inventorySearch, setInventorySearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [supplierFilter, setSupplierFilter] = useState('all');
@@ -413,6 +1035,109 @@ export function InventoryPage({
   const [selectedInventoryIds, setSelectedInventoryIds] = useState<string[]>([]);
 
   const activeSuppliers = suppliers.filter(supplier => supplier.is_active !== false);
+  const seedCategoryMap = useMemo(() => buildSeedCategoryMap(), []);
+  const seededCategoryOptions = useMemo(
+    () => uniqueSorted(Array.from(seedCategoryMap.keys())),
+    [seedCategoryMap]
+  );
+  const seededSubcategoryOptions = useMemo(
+    () => addItemForm.category
+      ? uniqueSorted(Array.from(seedCategoryMap.get(addItemForm.category) || []))
+      : uniqueSorted(seededInventoryCatalog.map(catalog => catalog.family)),
+    [addItemForm.category, seedCategoryMap]
+  );
+  const seededBrandOptions = useMemo(
+    () => uniqueSorted(getSeededVariants(addItemForm.category, addItemForm.parentProduct).map(seed => seed.brand)),
+    [addItemForm.category, addItemForm.parentProduct]
+  );
+  const hasQuantityLevels = isQuantifiableUnit(addItemForm.uom);
+  const updateAddItemUnit = (uom: string) => {
+    setAddItemForm(previous => ({
+      ...previous,
+      uom,
+      quantityLevels: isQuantifiableUnit(uom)
+        ? Array.from({ length: 5 }, (_, index) => createQuantityLevel(index + 1, uom, {
+            retailPrice: previous.retailPrice,
+            wholesalePrice: previous.wholesalePrice,
+            corporatePrice: previous.corporatePrice,
+            loyalPrice: previous.loyalPrice
+          }))
+        : []
+    }));
+  };
+
+  const updateAddItemTax = (tax: string) => {
+    setAddItemForm(previous => {
+      const nextPriceFields = applyTaxToPriceFields({
+        retailPrice: previous.retailPrice,
+        wholesalePrice: previous.wholesalePrice,
+        corporatePrice: previous.corporatePrice,
+        loyalPrice: previous.loyalPrice
+      }, previous.tax, tax);
+
+      return {
+        ...previous,
+        ...nextPriceFields,
+        tax,
+        quantityLevels: previous.quantityLevels.map(level =>
+          applyTaxToPriceFields(level, previous.tax, tax)
+        )
+      };
+    });
+  };
+
+  const updateQuantityLevel = (
+    index: number,
+    field: 'retailPrice' | 'wholesalePrice' | 'corporatePrice' | 'loyalPrice',
+    value: string
+  ) => {
+    setAddItemForm(previous => ({
+      ...previous,
+      quantityLevels: previous.quantityLevels.map((level, levelIndex) =>
+        levelIndex === index ? { ...level, [field]: value } : level
+      )
+    }));
+  };
+
+  const regenerateQuantityLevels = () => {
+    setAddItemForm(previous => ({
+      ...previous,
+      quantityLevels: Array.from({ length: 5 }, (_, index) => createQuantityLevel(index + 1, previous.uom, {
+        retailPrice: previous.retailPrice,
+        wholesalePrice: previous.wholesalePrice,
+        corporatePrice: previous.corporatePrice,
+        loyalPrice: previous.loyalPrice
+      }))
+    }));
+  };
+
+  const addQuantityLevel = () => {
+    setAddItemForm(previous => {
+      const nextQuantity = previous.quantityLevels.reduce((maximum, level) => {
+        return Math.max(maximum, Number(level.quantity) || 0);
+      }, 0) + 1;
+
+      return {
+        ...previous,
+        quantityLevels: [
+          ...previous.quantityLevels,
+          createQuantityLevel(nextQuantity, previous.uom, {
+            retailPrice: previous.retailPrice,
+            wholesalePrice: previous.wholesalePrice,
+            corporatePrice: previous.corporatePrice,
+            loyalPrice: previous.loyalPrice
+          })
+        ]
+      };
+    });
+  };
+
+  const removeQuantityLevel = (index: number) => {
+    setAddItemForm(previous => ({
+      ...previous,
+      quantityLevels: previous.quantityLevels.filter((_, levelIndex) => levelIndex !== index)
+    }));
+  };
 
   const pushNotification = (title: string, message: string, tone: InventoryNotification['tone'] = 'blue') => {
     const notification = {
@@ -447,6 +1172,31 @@ export function InventoryPage({
   }, [addItemForm, isAddItemOpen]);
 
   useEffect(() => {
+    if (!pendingGrnRequest?.orderItems?.length) {
+      setGrnReceivedQuantities({});
+      setIsPostingGrn(false);
+      setGrnDetails({
+        goodsReceivingNote: '',
+        deliveryNote: '',
+        receivingLocation: 'Main Store',
+        receivingNotes: ''
+      });
+      return;
+    }
+
+    setGrnReceivedQuantities(pendingGrnRequest.orderItems.reduce<Record<string, string>>((quantities, item) => {
+      quantities[item.productId] = String(item.deliveredQuantity || item.requestedQuantity || 0);
+      return quantities;
+    }, {}));
+    setGrnDetails({
+      goodsReceivingNote: pendingGrnRequest.goodsReceivingNote || '',
+      deliveryNote: pendingGrnRequest.deliveryNote || '',
+      receivingLocation: pendingGrnRequest.receivingLocation || 'Main Store',
+      receivingNotes: pendingGrnRequest.receivingNotes || ''
+    });
+  }, [pendingGrnRequest?.date, pendingGrnRequest?.supplierId, pendingGrnRequest?.goodsReceivingNote, pendingGrnRequest?.deliveryNote, pendingGrnRequest?.orderItems?.map(item => `${item.productId}:${item.requestedQuantity}`).join('|')]);
+
+  useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('pos-inventory-live') : null;
     const messageHandler = (event: MessageEvent) => {
       if (event.data?.type === 'inventory-notification') {
@@ -466,9 +1216,16 @@ export function InventoryPage({
     const supplierName = product.supplierName || supplierFromProduct?.name || supplierFromInvoices?.supplierName || 'No supplier linked';
     const reorderLevel = product.reorderLevel || getReorderLevel(product);
     const reserved = supplierInvoices
-      .filter(invoice => invoice.status !== 'delivered' && invoice.productId === product.id)
-      .reduce((sum, invoice) => sum + (invoice.quantityPending || 0), 0);
-    const buyingPrice = product.prices.wholesale || product.prices.retail * 0.7 || 0;
+      .filter(invoice => invoice.status !== 'delivered')
+      .reduce((sum, invoice) => {
+        const linePending = invoice.orderItems
+          ?.filter(item => item.productId === product.id)
+          .reduce((itemSum, item) => itemSum + item.pendingQuantity, 0);
+        if (typeof linePending === 'number' && linePending > 0) return sum + linePending;
+        return invoice.productId === product.id ? sum + (invoice.quantityPending || 0) : sum;
+      }, 0);
+    const buyingPrice = product.costPrice || product.prices.wholesale || product.prices.retail * 0.7 || 0;
+    const profitMargin = buyingPrice > 0 ? ((product.prices.retail - buyingPrice) / buyingPrice) * 100 : 0;
     const available = Math.max(product.stock - reserved, 0);
     const status: InventoryStatus = product.stock === 0
       ? 'Out Of Stock'
@@ -492,6 +1249,7 @@ export function InventoryPage({
       available,
       buyingPrice,
       selling: product.prices.retail,
+      profitMargin,
       inventoryValue: product.stock * buyingPrice,
       reorderLevel,
       status,
@@ -504,10 +1262,12 @@ export function InventoryPage({
     };
   }), [products, suppliers, supplierInvoices, stockMovements]);
 
-  const needsReorder = (item: InventoryRow) => item.current <= item.reorderLevel && item.reserved <= 0;
+  const needsReorder = (item: InventoryRow) => item.current <= item.reorderLevel;
+  const canCreateReorder = (item: InventoryRow) => needsReorder(item) && item.reserved <= 0;
   const lowStockItems = inventory.filter(item => item.status === 'Low Stock' && needsReorder(item));
   const outOfStockItems = inventory.filter(item => item.status === 'Out Of Stock' && needsReorder(item));
   const reorderSuggestionItems = inventory.filter(needsReorder);
+  const reorderableSuggestionItems = reorderSuggestionItems.filter(canCreateReorder);
   const todayMovements = stockMovements.filter(movement => isToday(movement.date));
   const todaySalesImpact = todayMovements
     .filter(movement => movementLabel(movement) === 'Sale')
@@ -527,9 +1287,10 @@ export function InventoryPage({
 
   useEffect(() => {
     const suggestionIds = reorderSuggestionItems.map(item => item.id);
+    const reorderableIds = reorderableSuggestionItems.map(item => item.id);
     setSelectedReorderItems(previousSelected => {
-      const retained = previousSelected.filter(productId => suggestionIds.includes(productId));
-      const added = suggestionIds.filter(productId => !retained.includes(productId));
+      const retained = previousSelected.filter(productId => reorderableIds.includes(productId));
+      const added = reorderableIds.filter(productId => !retained.includes(productId));
       return [...retained, ...added];
     });
     setReorderQuantities(previousQuantities => {
@@ -546,7 +1307,7 @@ export function InventoryPage({
       });
       return nextQuantities;
     });
-  }, [reorderSuggestionItems.map(item => `${item.id}:${item.current}:${item.reorderLevel}`).join('|')]);
+  }, [reorderSuggestionItems.map(item => `${item.id}:${item.current}:${item.reorderLevel}:${item.reserved}`).join('|')]);
 
   const categories = ['all', ...Array.from(new Set(inventory.map(item => item.category).filter(Boolean)))];
   const supplierFilterOptions = ['all', ...Array.from(new Set(inventory.map(item => item.supplierName).filter(Boolean)))];
@@ -589,6 +1350,29 @@ export function InventoryPage({
       value: inventory.filter(item => item.category === category).length
     }));
 
+  const categoryTables = useMemo(() => categories
+    .filter(category => category !== 'all')
+    .map(category => {
+      const items = inventory.filter(item => item.category === category);
+      const subcategories = Array.from(new Set(items.map(item => item.parentProduct || item.brand || 'Unclassified')));
+      return {
+        category,
+        itemCount: items.length,
+        stock: items.reduce((sum, item) => sum + item.current, 0),
+        value: items.reduce((sum, item) => sum + item.inventoryValue, 0),
+        subcategories: subcategories.map(subcategory => {
+          const subcategoryItems = items.filter(item => (item.parentProduct || item.brand || 'Unclassified') === subcategory);
+          return {
+            name: subcategory,
+            itemCount: subcategoryItems.length,
+            stock: subcategoryItems.reduce((sum, item) => sum + item.current, 0),
+            value: subcategoryItems.reduce((sum, item) => sum + item.inventoryValue, 0),
+            lowStock: subcategoryItems.filter(item => item.status === 'Low Stock' || item.status === 'Out Of Stock').length
+          };
+        })
+      };
+    }), [categories.join('|'), inventory]);
+
   const recentActivity = [
     ...stockMovements.slice(0, 8).map(movement => ({
       id: movement.id,
@@ -607,6 +1391,87 @@ export function InventoryPage({
   ].slice(0, 10);
 
   const selectedProduct = selectedProductId ? inventory.find(item => item.id === selectedProductId) : null;
+  const actionProduct = actionProductId ? inventory.find(item => item.id === actionProductId) : null;
+
+  const openStockAdjustment = (productId: string, type: 'in' | 'out', reason: string) => {
+    setAdjustmentType(type);
+    setAdjustmentForm({ productId, quantity: '1', reason });
+    setActionProductId(null);
+  };
+
+  const openProductHistory = (productId: string) => {
+    setSelectedProductId(productId);
+    setActionProductId(null);
+  };
+
+  const startProductReorder = (productId: string) => {
+    const item = inventory.find(row => row.id === productId);
+    if (item && !canCreateReorder(item)) return;
+    onReorderOutOfStock([productId]);
+    setActionProductId(null);
+  };
+
+  const handleBulkInventoryActions = () => {
+    const reorderableSelectedIds = selectedInventoryIds.filter(productId => {
+      const item = inventory.find(row => row.id === productId);
+      return item ? canCreateReorder(item) : false;
+    });
+    if (selectedInventoryIds.length === 0) return;
+    if (selectedInventoryIds.length === 1) {
+      setActionProductId(selectedInventoryIds[0]);
+      return;
+    }
+    if (reorderableSelectedIds.length === 0) {
+      toast.warning('No reorderable items selected', {
+        description: 'Selected low-stock items already have pending purchase orders.'
+      });
+      return;
+    }
+    onReorderOutOfStock(reorderableSelectedIds);
+    toast.success('Bulk reorder started', {
+      description: `${reorderableSelectedIds.length} selected item${reorderableSelectedIds.length === 1 ? '' : 's'} sent to procurement.`
+    });
+  };
+
+  const handlePrintLabels = () => {
+    if (selectedInventoryIds.length === 0) return;
+    const selectedItems = inventory.filter(item => selectedInventoryIds.includes(item.id));
+    const labelWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!labelWindow) {
+      toast.error('Unable to open labels', { description: 'Allow pop-ups for this site and try again.' });
+      return;
+    }
+
+    labelWindow.document.write(`
+      <html>
+        <head>
+          <title>Product Labels</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; }
+            .labels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+            .label { border: 1px solid #d1d5db; border-radius: 6px; padding: 12px; min-height: 100px; }
+            .name { font-weight: 700; margin-bottom: 8px; }
+            .sku { font-family: monospace; font-size: 12px; color: #4b5563; }
+            .price { margin-top: 8px; font-weight: 700; color: #047857; }
+          </style>
+        </head>
+        <body>
+          <div class="labels">
+            ${selectedItems.map(item => `
+              <div class="label">
+                <div class="name">${item.name}</div>
+                <div class="sku">${item.sku}</div>
+                <div>${item.category}</div>
+                <div class="price">${formatCurrency(item.selling)}</div>
+              </div>
+            `).join('')}
+          </div>
+          <script>window.print();</script>
+        </body>
+      </html>
+    `);
+    labelWindow.document.close();
+  };
   const visibleInventoryIds = filteredInventory.map(item => item.id);
   const allVisibleSelected = visibleInventoryIds.length > 0 && visibleInventoryIds.every(id => selectedInventoryIds.includes(id));
   const toggleVisibleInventorySelection = () => {
@@ -635,6 +1500,40 @@ export function InventoryPage({
           });
       })
     : undefined;
+
+  const handleSeedCategoryChange = (category: string) => {
+    const firstSubcategory = uniqueSorted(Array.from(seedCategoryMap.get(category) || []))[0] || '';
+    const matchingVariants = getSeededVariants(category, firstSubcategory);
+    const firstVariant = matchingVariants[0];
+
+    setAddItemForm(previous => ({
+      ...previous,
+      category,
+      parentProduct: firstSubcategory,
+      brand: firstVariant?.brand || '',
+      itemType: '',
+      size: '',
+      packSize: '',
+      uom: firstVariant?.uom || previous.uom,
+      reorderLevel: previous.reorderLevel || (firstVariant ? String(firstVariant.reorderLevel) : '')
+    }));
+  };
+
+  const handleSeedSubcategoryChange = (parentProduct: string) => {
+    const matchingVariants = getSeededVariants(addItemForm.category, parentProduct);
+    const firstVariant = matchingVariants[0];
+
+    setAddItemForm(previous => ({
+      ...previous,
+      parentProduct,
+      brand: firstVariant?.brand || '',
+      itemType: '',
+      size: '',
+      packSize: '',
+      uom: firstVariant?.uom || previous.uom,
+      reorderLevel: previous.reorderLevel || (firstVariant ? String(firstVariant.reorderLevel) : '')
+    }));
+  };
 
   const openAdjustmentDialog = (type: 'in' | 'out', productId = products[0]?.id || '') => {
     setFormError('');
@@ -711,6 +1610,8 @@ export function InventoryPage({
   };
 
   const toggleReorderItem = (productId: string) => {
+    const item = reorderSuggestionItems.find(row => row.id === productId);
+    if (item && !canCreateReorder(item)) return;
     setSelectedReorderItems(previousSelected =>
       previousSelected.includes(productId)
         ? previousSelected.filter(selectedId => selectedId !== productId)
@@ -720,6 +1621,10 @@ export function InventoryPage({
 
   const submitReorderSuggestions = () => {
     const selectedItems = selectedReorderItems
+      .filter(productId => {
+        const item = reorderSuggestionItems.find(row => row.id === productId);
+        return item ? canCreateReorder(item) : false;
+      })
       .map(productId => ({
         productId,
         quantity: Number(reorderQuantities[productId] || 0)
@@ -730,6 +1635,11 @@ export function InventoryPage({
       toast.warning('Select at least one reorder item', {
         description: 'Choose low-stock items and enter the quantity needed.'
       });
+      return;
+    }
+
+    if (selectedItems.length === 1) {
+      onReorderOutOfStock([selectedItems[0].productId]);
       return;
     }
 
@@ -747,6 +1657,14 @@ export function InventoryPage({
     }
     if (activeSuppliers.length > 0 && !addItemForm.supplierId) {
       setFormError('Select the supplier company for this item.');
+      return false;
+    }
+    if (addItemForm.trackExpiry && !addItemForm.expiryDate) {
+      setFormError('Enter the expiry date for this item.');
+      return false;
+    }
+    if (isQuantifiableUnit(addItemForm.uom) && addItemForm.quantityLevels.some(level => !level.retailPrice || Number(level.retailPrice) <= 0)) {
+      setFormError('Enter the retail price for each POS quantity level.');
       return false;
     }
     setFormError('');
@@ -808,6 +1726,18 @@ export function InventoryPage({
     const corporatePrice = Number(addItemForm.corporatePrice) || wholesalePrice || retailPrice;
     const loyalPrice = Number(addItemForm.loyalPrice) || retailPrice;
     const buyingPrice = Number(addItemForm.buyingPrice) || 0;
+    const quantityLevels = isQuantifiableUnit(addItemForm.uom)
+      ? addItemForm.quantityLevels.map(level => ({
+          quantity: Number(level.quantity),
+          label: level.label,
+          prices: {
+            retail: Number(level.retailPrice) || 0,
+            wholesale: Number(level.wholesalePrice) || Number(level.retailPrice) || 0,
+            corporate: Number(level.corporatePrice) || Number(level.wholesalePrice) || Number(level.retailPrice) || 0,
+            loyal: Number(level.loyalPrice) || Number(level.retailPrice) || 0
+          }
+        }))
+      : [];
 
     try {
       await onAddItem({
@@ -837,6 +1767,8 @@ export function InventoryPage({
         stock: Number(addItemForm.stock) || 0,
         reorderLevel: Number(addItemForm.reorderLevel) || 0,
         maximumStock: Number(addItemForm.maximumStock) || undefined,
+        expiryDate: addItemForm.trackExpiry ? addItemForm.expiryDate : undefined,
+        quantityLevels,
         image: addItemForm.imageUrl.trim() || addItemForm.images[0] || '',
         tax: Number(addItemForm.tax) || 0
       });
@@ -920,7 +1852,7 @@ export function InventoryPage({
         <Input placeholder="Variant / flavour" value={addItemForm.itemType} onChange={(event) => setAddItemForm({ ...addItemForm, itemType: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Input placeholder="Size (e.g. 500ml)" value={addItemForm.size} onChange={(event) => setAddItemForm({ ...addItemForm, size: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Input placeholder="Weight" value={addItemForm.weight} onChange={(event) => setAddItemForm({ ...addItemForm, weight: event.target.value })} className="bg-gray-100 border-gray-200" />
-        <Select value={addItemForm.uom} onValueChange={(uom) => setAddItemForm({ ...addItemForm, uom })}>
+        <Select value={addItemForm.uom} onValueChange={updateAddItemUnit}>
           <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue placeholder="Unit" /></SelectTrigger>
           <SelectContent>{unitOptions.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}</SelectContent>
         </Select>
@@ -936,7 +1868,7 @@ export function InventoryPage({
         <Input type="number" placeholder="Wholesale price" value={addItemForm.wholesalePrice} onChange={(event) => setAddItemForm({ ...addItemForm, wholesalePrice: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Input type="number" placeholder="Corporate price" value={addItemForm.corporatePrice} onChange={(event) => setAddItemForm({ ...addItemForm, corporatePrice: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Input type="number" placeholder="Loyalty price" value={addItemForm.loyalPrice} onChange={(event) => setAddItemForm({ ...addItemForm, loyalPrice: event.target.value })} className="bg-gray-100 border-gray-200" />
-        <Input type="number" placeholder="Tax %" value={addItemForm.tax} onChange={(event) => setAddItemForm({ ...addItemForm, tax: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input type="number" placeholder="Tax %" value={addItemForm.tax} onChange={(event) => updateAddItemTax(event.target.value)} className="bg-gray-100 border-gray-200" />
       </section>
 
       <section className="space-y-3 border-t border-gray-200 pt-5">
@@ -1025,23 +1957,90 @@ export function InventoryPage({
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Category <span className="text-red-500">*</span></label>
-                <Input placeholder="Select category" value={addItemForm.category} onChange={(event) => setAddItemForm({ ...addItemForm, category: event.target.value })} className="bg-gray-100 border-gray-200" />
+                <SearchableSeedSelect
+                  value={addItemForm.category}
+                  options={seededCategoryOptions}
+                  placeholder="Select category"
+                  onChange={handleSeedCategoryChange}
+                />
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium text-gray-700">Sub Category</label>
-                <Input placeholder="Select sub category" value={addItemForm.parentProduct} onChange={(event) => setAddItemForm({ ...addItemForm, parentProduct: event.target.value })} className="bg-gray-100 border-gray-200" />
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium text-gray-700">Sub Category</label>
+                  <span className="text-xs text-gray-500">{seededSubcategoryOptions.length} listed</span>
+                </div>
+                <SearchableSeedSelect
+                  value={addItemForm.parentProduct}
+                  options={seededSubcategoryOptions}
+                  placeholder="Select sub category"
+                  onChange={handleSeedSubcategoryChange}
+                />
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Brand <span className="text-red-500">*</span></label>
-                <Input placeholder="Select brand" value={addItemForm.brand} onChange={(event) => setAddItemForm({ ...addItemForm, brand: event.target.value })} className="bg-gray-100 border-gray-200" />
+                <SearchableSeedSelect
+                  value={addItemForm.brand}
+                  options={seededBrandOptions}
+                  placeholder="Select brand"
+                  onChange={(brand) => setAddItemForm({ ...addItemForm, brand })}
+                />
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Unit <span className="text-red-500">*</span></label>
-                <Select value={addItemForm.uom} onValueChange={(uom) => setAddItemForm({ ...addItemForm, uom })}>
+                <Select value={addItemForm.uom} onValueChange={updateAddItemUnit}>
                   <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue placeholder="Select unit" /></SelectTrigger>
                   <SelectContent>{unitOptions.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+              {hasQuantityLevels && (
+                <div className="space-y-3 rounded-md border border-blue-100 bg-blue-50/60 p-3 md:col-span-2 xl:col-span-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">POS quantity levels</p>
+                      <p className="text-xs text-gray-500">Set the selling price for each selectable quantity shown in POS.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={regenerateQuantityLevels}>
+                        Generate from prices
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={addQuantityLevel}>
+                        Add level
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    {addItemForm.quantityLevels.map((level, index) => (
+                      <div key={`${level.quantity}-${index}`} className="grid grid-cols-1 gap-2 rounded-md border border-gray-200 bg-white p-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]">
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Quantity</label>
+                          <Input readOnly value={level.label} className="mt-1 bg-gray-100 border-gray-200" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Retail</label>
+                          <Input type="number" value={level.retailPrice} onChange={(event) => updateQuantityLevel(index, 'retailPrice', event.target.value)} className="mt-1 bg-gray-100 border-gray-200" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Wholesale</label>
+                          <Input type="number" value={level.wholesalePrice} onChange={(event) => updateQuantityLevel(index, 'wholesalePrice', event.target.value)} className="mt-1 bg-gray-100 border-gray-200" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Corporate</label>
+                          <Input type="number" value={level.corporatePrice} onChange={(event) => updateQuantityLevel(index, 'corporatePrice', event.target.value)} className="mt-1 bg-gray-100 border-gray-200" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Loyalty</label>
+                          <Input type="number" value={level.loyalPrice} onChange={(event) => updateQuantityLevel(index, 'loyalPrice', event.target.value)} className="mt-1 bg-gray-100 border-gray-200" />
+                        </div>
+                        <div className="flex items-end">
+                          <Button type="button" variant="outline" size="sm" onClick={() => removeQuantityLevel(index)} disabled={addItemForm.quantityLevels.length <= 1}>
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -1060,7 +2059,7 @@ export function InventoryPage({
               <div className="space-y-1.5"><label className="text-sm font-medium text-gray-700">Loyalty Price</label><Input type="number" placeholder="0.00" value={addItemForm.loyalPrice} onChange={(event) => setAddItemForm({ ...addItemForm, loyalPrice: event.target.value })} className="bg-gray-100 border-gray-200" /></div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Tax %</label>
-                <Select value={addItemForm.tax} onValueChange={(tax) => setAddItemForm({ ...addItemForm, tax })}>
+                <Select value={addItemForm.tax} onValueChange={updateAddItemTax}>
                   <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue placeholder="Select tax" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="0">0%</SelectItem>
@@ -1195,9 +2194,20 @@ export function InventoryPage({
                 </div>
               </div>
               <label className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-                <input type="checkbox" checked={addItemForm.trackExpiry} onChange={(event) => setAddItemForm({ ...addItemForm, trackExpiry: event.target.checked })} />
+                <input type="checkbox" checked={addItemForm.trackExpiry} onChange={(event) => setAddItemForm({ ...addItemForm, trackExpiry: event.target.checked, expiryDate: event.target.checked ? addItemForm.expiryDate : '' })} />
                 <span><span className="block text-sm font-medium text-gray-900">Track Expiry Date</span><span className="block text-xs text-gray-500">Enable if this product has an expiry date.</span></span>
               </label>
+              {addItemForm.trackExpiry && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Expiry Date <span className="text-red-500">*</span></label>
+                  <Input
+                    type="date"
+                    value={addItemForm.expiryDate}
+                    onChange={(event) => setAddItemForm({ ...addItemForm, expiryDate: event.target.value })}
+                    className="bg-gray-100 border-gray-200"
+                  />
+                </div>
+              )}
               <label className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
                 <input type="checkbox" checked={addItemForm.publishToPos} onChange={(event) => setAddItemForm({ ...addItemForm, publishToPos: event.target.checked })} />
                 <span><span className="block text-sm font-medium text-gray-900">Publish to POS</span><span className="block text-xs text-gray-500">Available for sale in POS.</span></span>
@@ -1224,9 +2234,13 @@ export function InventoryPage({
             <Plus className="mr-2 h-4 w-4" />
             Add Item
           </Button>
-          <Button variant="outline" disabled={outOfStockItems.length === 0} onClick={() => onReorderOutOfStock(outOfStockItems.map(item => item.id))}>
+          <Button
+            variant="outline"
+            disabled={outOfStockItems.filter(canCreateReorder).length === 0}
+            onClick={() => onReorderOutOfStock(outOfStockItems.filter(canCreateReorder).map(item => item.id))}
+          >
             <PackageMinus className="mr-2 h-4 w-4" />
-            Reorder All Out of Stock ({outOfStockItems.length})
+            Reorder All Out of Stock ({outOfStockItems.filter(canCreateReorder).length})
           </Button>
           <Button variant="outline" onClick={() => setIsNotificationsOpen(true)}>
             <Bell className="mr-2 h-4 w-4" />
@@ -1293,8 +2307,8 @@ export function InventoryPage({
               </SelectContent>
             </Select>
             <div className="flex items-center justify-end gap-2">
-              <Button variant="outline" className="gap-2">
-                <Filter className="h-4 w-4" />
+              <Button variant="outline" className="gap-2" onClick={() => setIsMoreFiltersOpen(true)}>
+                <SlidersHorizontal className="h-4 w-4" />
                 More Filters
               </Button>
               <div className="flex rounded-md border border-gray-200 bg-gray-100 p-1">
@@ -1379,8 +2393,14 @@ export function InventoryPage({
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => setIsBulkImportOpen(true)}><Upload className="mr-2 h-4 w-4" />Import</Button>
-            <Button variant="outline" size="sm" onClick={handleDownloadTemplate} disabled={isTemplateDownloading}>{isTemplateDownloading ? 'Downloading...' : 'Template'}</Button>
-            <Button variant="outline" size="sm" onClick={handleDownloadAvailableItems} disabled={isExportDownloading}>{isExportDownloading ? 'Downloading...' : 'Available Items'}</Button>
+            <Button variant={isTemplateDownloading ? 'default' : 'outline'} size="sm" onClick={handleDownloadTemplate} disabled={isTemplateDownloading} className={isTemplateDownloading ? 'bg-blue-600 text-white' : ''}>
+              {isTemplateDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              {isTemplateDownloading ? 'Downloading' : 'Template'}
+            </Button>
+            <Button variant={isExportDownloading ? 'default' : 'outline'} size="sm" onClick={handleDownloadAvailableItems} disabled={isExportDownloading} className={isExportDownloading ? 'bg-blue-600 text-white' : ''}>
+              {isExportDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              {isExportDownloading ? 'Downloading' : 'Available Items'}
+            </Button>
           </div>
           <Card className={outOfStockItems.length > 0 ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white'}>
             <CardContent className="p-4">
@@ -1399,12 +2419,12 @@ export function InventoryPage({
                   </div>
                 </div>
                 <Button
-                  className="bg-red-600 text-white hover:bg-red-700"
-                  disabled={outOfStockItems.length === 0}
-                  onClick={() => onReorderOutOfStock(outOfStockItems.map(item => item.id))}
+                  className="bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                  disabled={outOfStockItems.filter(canCreateReorder).length === 0}
+                  onClick={() => onReorderOutOfStock(outOfStockItems.filter(canCreateReorder).map(item => item.id))}
                 >
                   <ShoppingBag className="mr-2 h-4 w-4" />
-                  Reorder All ({outOfStockItems.length})
+                  Reorder All ({outOfStockItems.filter(canCreateReorder).length})
                 </Button>
               </div>
             </CardContent>
@@ -1421,7 +2441,12 @@ export function InventoryPage({
                       <p className="text-sm font-semibold text-red-900">Out of stock batch</p>
                       <p className="text-xs text-red-700">{outOfStockItems.length} item{outOfStockItems.length === 1 ? '' : 's'} can be reordered together.</p>
                     </div>
-                    <Button size="sm" className="bg-red-600 text-white hover:bg-red-700" onClick={() => onReorderOutOfStock(outOfStockItems.map(item => item.id))}>
+                    <Button
+                      size="sm"
+                      className="bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                      disabled={outOfStockItems.every(item => !canCreateReorder(item))}
+                      onClick={() => onReorderOutOfStock(outOfStockItems.filter(canCreateReorder).map(item => item.id))}
+                    >
                       Reorder All
                     </Button>
                   </div>
@@ -1432,9 +2457,19 @@ export function InventoryPage({
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <p className="text-sm font-medium text-gray-900">{item.name}</p>
-                      <p className="text-xs text-gray-600">{item.current} left, reorder at {item.reorderLevel}</p>
+                      <p className="text-xs text-gray-600">
+                        {item.current} left, reorder at {item.reorderLevel}
+                        {item.reserved > 0 ? ` | ${item.reserved} pending PO` : ''}
+                      </p>
                     </div>
-                    <Button size="sm" variant="outline" onClick={() => onReorderOutOfStock([item.id])}>Reorder</Button>
+                    <Button
+                      size="sm"
+                      className="bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                      disabled={!canCreateReorder(item)}
+                      onClick={() => onReorderOutOfStock([item.id])}
+                    >
+                      {item.reserved > 0 ? 'PO Pending' : 'Reorder'}
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -1467,9 +2502,12 @@ export function InventoryPage({
               <p className="mt-1 text-sm text-gray-500">Showing {filteredInventory.length} of {inventory.length} products</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" disabled={selectedInventoryIds.length === 0}>Bulk Actions ({selectedInventoryIds.length})</Button>
-              <Button variant="outline" onClick={handleDownloadAvailableItems} disabled={isExportDownloading}>Export</Button>
-              <Button variant="outline" disabled={selectedInventoryIds.length === 0}>Print Labels</Button>
+              <Button variant="outline" disabled={selectedInventoryIds.length === 0} onClick={handleBulkInventoryActions}>Bulk Actions ({selectedInventoryIds.length})</Button>
+              <Button variant={isExportDownloading ? 'default' : 'outline'} onClick={handleDownloadAvailableItems} disabled={isExportDownloading} className={isExportDownloading ? 'bg-blue-600 text-white' : ''}>
+                {isExportDownloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                {isExportDownloading ? 'Exporting' : 'Export'}
+              </Button>
+              <Button variant="outline" disabled={selectedInventoryIds.length === 0} onClick={handlePrintLabels}>Print Labels</Button>
             </div>
           </div>
         </CardHeader>
@@ -1477,24 +2515,34 @@ export function InventoryPage({
           {tableView === 'grid' ? (
             <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
               {filteredInventory.map(item => (
-                <button
+                <div
                   key={item.id}
-                  type="button"
                   className="rounded-md border border-gray-200 bg-white p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
-                  onClick={() => setSelectedProductId(item.id)}
                 >
                   <div className="flex items-start gap-3">
                     <ImageWithFallback src={item.image} alt={item.name} className="h-12 w-12 rounded-md object-cover" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-gray-900">{item.name}</p>
+                      <button type="button" className="truncate text-left font-semibold text-gray-900" onClick={() => setSelectedProductId(item.id)}>{item.name}</button>
                       <p className="text-xs text-gray-500">{item.sku} | {item.supplierName}</p>
                       <div className="mt-2 flex items-center justify-between gap-2">
                         <Badge className={statusClassName(item.status)}>{item.status}</Badge>
                         <span className={item.current <= item.reorderLevel ? 'text-sm font-semibold text-red-600' : 'text-sm font-semibold text-green-700'}>{item.current} {item.uom}</span>
                       </div>
+                      {item.current <= item.reorderLevel && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="mt-3 bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                          disabled={!canCreateReorder(item)}
+                          onClick={() => onReorderOutOfStock([item.id])}
+                        >
+                          <ShoppingBag className="mr-2 h-4 w-4" />
+                          {item.reserved > 0 ? 'PO Pending' : 'Reorder'}
+                        </Button>
+                      )}
                     </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           ) : (
@@ -1513,6 +2561,7 @@ export function InventoryPage({
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Cost</TableHead>
                     <TableHead className="text-right">Selling</TableHead>
+                    <TableHead className="text-right">Margin</TableHead>
                     <TableHead className="text-right">Stock Value</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -1520,7 +2569,7 @@ export function InventoryPage({
                 <TableBody>
                   {filteredInventory.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="h-32 text-center text-gray-500">No products match the selected filters.</TableCell>
+                      <TableCell colSpan={12} className="h-32 text-center text-gray-500">No products match the selected filters.</TableCell>
                     </TableRow>
                   ) : filteredInventory.map(item => (
                     <TableRow key={item.id} className="hover:bg-gray-50">
@@ -1547,25 +2596,34 @@ export function InventoryPage({
                       <TableCell><Badge className={statusClassName(item.status)}>{item.status}</Badge></TableCell>
                       <TableCell className="text-right">{formatCurrency(item.buyingPrice)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(item.selling)}</TableCell>
+                      <TableCell className={item.profitMargin >= 0 ? 'text-right font-medium text-green-700' : 'text-right font-medium text-red-700'}>
+                        {item.profitMargin.toFixed(1)}%
+                      </TableCell>
                       <TableCell className="text-right font-medium text-gray-900">{formatCurrency(item.inventoryValue)}</TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
-                          <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-blue-700" onClick={() => {
-                            setAdjustmentType('in');
-                            setAdjustmentForm({ productId: item.id, quantity: '1', reason: 'Quick stock in' });
-                          }}>
+                          {item.current <= item.reorderLevel && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 bg-red-600 px-2 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                              disabled={!canCreateReorder(item)}
+                              onClick={() => onReorderOutOfStock([item.id])}
+                              title={item.reserved > 0 ? 'Purchase order already pending' : 'Reorder low stock'}
+                            >
+                              <ShoppingBag className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-orange-700" onClick={() => openStockAdjustment(item.id, 'in', 'Quick stock in')} title="Stock in">
                             <Plus className="h-4 w-4" />
                           </Button>
-                          <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-red-700" onClick={() => {
-                            setAdjustmentType('out');
-                            setAdjustmentForm({ productId: item.id, quantity: '1', reason: 'Quick stock out' });
-                          }}>
-                            <Minus className="h-4 w-4" />
+                          <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-blue-700" onClick={() => openProductHistory(item.id)} title="View history">
+                            <Eye className="h-4 w-4" />
                           </Button>
-                          <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-blue-700" onClick={() => setSelectedProductId(item.id)}>
-                            <RotateCcw className="h-4 w-4" />
+                          <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-green-700" onClick={() => setActionProductId(item.id)} title="Edit product actions">
+                            <Edit className="h-4 w-4" />
                           </Button>
-                          <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0">
+                          <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => setActionProductId(item.id)} title="More actions">
                             <MoreVertical className="h-4 w-4" />
                           </Button>
                         </div>
@@ -1584,6 +2642,7 @@ export function InventoryPage({
           <TabsTrigger value="history" className="data-[state=active]:bg-blue-600">Inventory History</TabsTrigger>
           <TabsTrigger value="timeline" className="data-[state=active]:bg-blue-600">Movement Timeline</TabsTrigger>
           <TabsTrigger value="reorders" className="data-[state=active]:bg-blue-600">Reorder Suggestions</TabsTrigger>
+          <TabsTrigger value="categories" className="data-[state=active]:bg-blue-600">Categories</TabsTrigger>
         </TabsList>
         <TabsContent value="history">
           <Card className="bg-white border-gray-200">
@@ -1670,8 +2729,8 @@ export function InventoryPage({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setSelectedReorderItems(reorderSuggestionItems.map(item => item.id))}
-                    disabled={reorderSuggestionItems.length === 0}
+                    onClick={() => setSelectedReorderItems(reorderableSuggestionItems.map(item => item.id))}
+                    disabled={reorderableSuggestionItems.length === 0}
                   >
                     Select All
                   </Button>
@@ -1687,10 +2746,10 @@ export function InventoryPage({
                     type="button"
                     className="bg-blue-600 text-white hover:bg-blue-700"
                     onClick={submitReorderSuggestions}
-                    disabled={selectedReorderItems.length === 0}
+                    disabled={selectedReorderItems.filter(productId => reorderableSuggestionItems.some(item => item.id === productId)).length === 0}
                   >
                     <ShoppingBag className="mr-2 h-4 w-4" />
-                    Submit Purchase Order ({selectedReorderItems.length})
+                    Submit Purchase Order ({selectedReorderItems.filter(productId => reorderableSuggestionItems.some(item => item.id === productId)).length})
                   </Button>
                 </div>
               </div>
@@ -1709,6 +2768,7 @@ export function InventoryPage({
                     {reorderSuggestionItems.map(item => {
                       const isSelected = selectedReorderItems.includes(item.id);
                       const hasLinkedSupplier = Boolean(item.supplierId);
+                      const isPendingPo = item.reserved > 0;
 
                       return (
                         <div key={item.id} className={`rounded-md border p-4 ${isSelected ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}>
@@ -1717,9 +2777,10 @@ export function InventoryPage({
                               <input
                                 type="checkbox"
                                 checked={isSelected}
+                                disabled={!canCreateReorder(item)}
                                 onChange={() => toggleReorderItem(item.id)}
                               />
-                              Include
+                              {isPendingPo ? 'Pending PO' : 'Include'}
                             </label>
                             <div>
                               <div className="flex flex-wrap items-center gap-2">
@@ -1729,6 +2790,7 @@ export function InventoryPage({
                               </div>
                               <p className="mt-1 text-sm text-gray-500">
                                 Supplier: {item.supplierName} | Current: {item.current} {item.uom} | Reorder level: {item.reorderLevel}
+                                {item.reserved > 0 ? ` | Pending PO: ${item.reserved} ${item.uom}` : ''}
                               </p>
                             </div>
                             <Input
@@ -1741,14 +2803,14 @@ export function InventoryPage({
                             />
                             <Button
                               type="button"
-                              variant="outline"
-                              disabled={!hasLinkedSupplier}
+                              className="bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                              disabled={!hasLinkedSupplier || !canCreateReorder(item)}
                               onClick={() => {
                                 setSelectedReorderItems([item.id]);
                                 onCreateReorderPurchaseOrders([{ productId: item.id, quantity: Number(reorderQuantities[item.id] || Math.max(1, item.reorderLevel * 2 - item.current)) }]);
                               }}
                             >
-                              Create PO
+                              {isPendingPo ? 'PO Pending' : 'Create PO'}
                             </Button>
                           </div>
                         </div>
@@ -1760,7 +2822,142 @@ export function InventoryPage({
             </CardContent>
           </Card>
         </TabsContent>
+        <TabsContent value="categories">
+          <div className="space-y-4">
+            {categoryTables.length === 0 ? (
+              <Card className="bg-white border-gray-200">
+                <CardContent className="p-5 text-sm text-gray-500">No product categories have been configured yet.</CardContent>
+              </Card>
+            ) : categoryTables.map(categoryTable => (
+              <Card key={categoryTable.category} className="bg-white border-gray-200">
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <CardTitle className="text-gray-900">{categoryTable.category}</CardTitle>
+                    <div className="flex flex-wrap gap-2 text-sm text-gray-500">
+                      <Badge variant="outline">{categoryTable.itemCount} items</Badge>
+                      <Badge variant="outline">{categoryTable.stock} stock</Badge>
+                      <Badge variant="outline">{formatCurrency(categoryTable.value)}</Badge>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Subcategory</TableHead>
+                          <TableHead>Items</TableHead>
+                          <TableHead>Total Stock</TableHead>
+                          <TableHead>Inventory Value</TableHead>
+                          <TableHead>Low Stock</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {categoryTable.subcategories.map(subcategory => (
+                          <TableRow key={`${categoryTable.category}-${subcategory.name}`}>
+                            <TableCell className="font-medium text-gray-900">{subcategory.name}</TableCell>
+                            <TableCell>{subcategory.itemCount}</TableCell>
+                            <TableCell>{subcategory.stock}</TableCell>
+                            <TableCell>{formatCurrency(subcategory.value)}</TableCell>
+                            <TableCell>
+                              <Badge className={subcategory.lowStock > 0 ? 'bg-yellow-500/20 text-yellow-800 border-yellow-200' : 'bg-green-500/15 text-green-700 border-green-200'}>
+                                {subcategory.lowStock}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </TabsContent>
       </Tabs>
+
+      <Dialog open={isMoreFiltersOpen} onOpenChange={setIsMoreFiltersOpen}>
+        <DialogContent className="bg-white border-gray-200 max-w-lg">
+          <DialogHeader><DialogTitle>More Filters</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Category</label>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {categories.map(category => <SelectItem key={category} value={category}>{category === 'all' ? 'All Categories' : category}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Supplier</label>
+              <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {supplierFilterOptions.map(supplier => <SelectItem key={supplier} value={supplier}>{supplier === 'all' ? 'All Suppliers' : supplier}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Stock Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {statusFilterOptions.map(status => <SelectItem key={status} value={status}>{status === 'all' ? 'All Statuses' : status}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-gray-700">Search</label>
+              <Input value={inventorySearch} onChange={(event) => setInventorySearch(event.target.value)} placeholder="Product, SKU, or supplier" className="bg-gray-100 border-gray-200" />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button className="flex-1 bg-blue-600 hover:bg-blue-700" onClick={() => setIsMoreFiltersOpen(false)}>Apply Filters</Button>
+            <Button variant="outline" onClick={() => {
+              setInventorySearch('');
+              setCategoryFilter('all');
+              setSupplierFilter('all');
+              setStatusFilter('all');
+            }}>Reset</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!actionProduct} onOpenChange={(open) => !open && setActionProductId(null)}>
+        <DialogContent className="bg-white border-gray-200 max-w-md">
+          <DialogHeader><DialogTitle>Product Actions</DialogTitle></DialogHeader>
+          {actionProduct && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 rounded-md border border-gray-200 p-3">
+                <ImageWithFallback src={actionProduct.image} alt={actionProduct.name} className="h-12 w-12 rounded-md object-cover" />
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-gray-900">{actionProduct.name}</p>
+                  <p className="text-sm text-gray-500">{actionProduct.current} {actionProduct.uom} in stock</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" className="justify-start" onClick={() => openStockAdjustment(actionProduct.id, 'in', 'Quick stock in')}>
+                  <Plus className="mr-2 h-4 w-4 text-orange-700" />
+                  Stock In
+                </Button>
+                <Button variant="outline" className="justify-start" onClick={() => openStockAdjustment(actionProduct.id, 'out', 'Quick stock out')}>
+                  <Minus className="mr-2 h-4 w-4 text-red-700" />
+                  Stock Out
+                </Button>
+                <Button variant="outline" className="justify-start" onClick={() => openProductHistory(actionProduct.id)}>
+                  <Eye className="mr-2 h-4 w-4 text-blue-700" />
+                  View History
+                </Button>
+                <Button variant="outline" className="justify-start" onClick={() => startProductReorder(actionProduct.id)}>
+                  <ShoppingBag className="mr-2 h-4 w-4 text-green-700" />
+                  Reorder
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isAddItemOpen} onOpenChange={(open) => {
         if (!open && JSON.stringify(addItemForm) !== JSON.stringify(blankAddItemForm) && !window.confirm('Discard unsaved inventory item draft?')) return;
@@ -1856,6 +3053,165 @@ export function InventoryPage({
               </div>
             ))}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(pendingGrnRequest)}
+        onOpenChange={(open) => {
+          if (!open) {
+            onCloseGrn();
+          }
+        }}
+      >
+        <DialogContent className="bg-white border-gray-200 max-w-3xl">
+          <DialogHeader><DialogTitle>Goods Receiving Note</DialogTitle></DialogHeader>
+          {pendingGrnRequest && (
+            <div className="space-y-4">
+              <div className="rounded-md border border-green-200 bg-green-50 p-3">
+                <p className="font-semibold text-green-900">GRN linked to purchase order</p>
+                <p className="text-sm text-green-700">
+                  Reference: {'id' in pendingGrnRequest ? pendingGrnRequest.id : pendingGrnRequest.goodsReceivingNote || 'PO Draft'} | {pendingGrnRequest.supplierName} | {pendingGrnRequest.date}
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">GRN Reference</label>
+                  <Input
+                    placeholder="Auto-generated if blank"
+                    value={grnDetails.goodsReceivingNote}
+                    onChange={(event) => setGrnDetails(previous => ({ ...previous, goodsReceivingNote: event.target.value }))}
+                    className="bg-white border-gray-200"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Delivery Note</label>
+                  <Input
+                    placeholder="Supplier delivery note"
+                    value={grnDetails.deliveryNote}
+                    onChange={(event) => setGrnDetails(previous => ({ ...previous, deliveryNote: event.target.value }))}
+                    className="bg-white border-gray-200"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Receiving Location</label>
+                  <Input
+                    value={grnDetails.receivingLocation}
+                    onChange={(event) => setGrnDetails(previous => ({ ...previous, receivingLocation: event.target.value }))}
+                    className="bg-white border-gray-200"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-gray-700">Receiving Notes</label>
+                  <Input
+                    placeholder="Condition, batch notes, verifier comments"
+                    value={grnDetails.receivingNotes}
+                    onChange={(event) => setGrnDetails(previous => ({ ...previous, receivingNotes: event.target.value }))}
+                    className="bg-white border-gray-200"
+                  />
+                </div>
+              </div>
+              <div className="rounded-md border border-gray-200">
+                <div className="grid grid-cols-[1fr_100px_140px] gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                  <span>Item</span>
+                  <span>Requested</span>
+                  <span>Received</span>
+                </div>
+                {(pendingGrnRequest.orderItems || []).map(item => (
+                  <div key={item.productId} className="grid grid-cols-[1fr_100px_140px] gap-3 border-b border-gray-100 px-3 py-3 text-sm last:border-b-0">
+                    <div>
+                      <p className="font-medium text-gray-900">{item.productName}</p>
+                      <p className="text-xs text-gray-500">{item.sku || item.productId} | Supplier SKU: {item.supplierSku || '-'}</p>
+                    </div>
+                    <p className="self-center text-gray-700">{item.requestedQuantity}</p>
+                    <Input
+                      type="number"
+                      min="0"
+                      max={item.requestedQuantity}
+                      value={grnReceivedQuantities[item.productId] || ''}
+                      onChange={(event) => setGrnReceivedQuantities(previous => ({ ...previous, [item.productId]: event.target.value }))}
+                      className="h-8 bg-white border-gray-200"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="sm:w-36"
+                  onClick={onCloseGrn}
+                >
+                  {isPostingGrn ? 'Close' : 'Cancel'}
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1 bg-green-600 text-white hover:bg-green-700"
+                  disabled={isPostingGrn}
+                  onClick={async () => {
+                  if (isPostingGrn) return;
+                  const verifiedItems = (pendingGrnRequest.orderItems || []).map(item => {
+                    const deliveredQuantity = Math.max(0, Math.min(item.requestedQuantity, Number(grnReceivedQuantities[item.productId] || item.requestedQuantity) || 0));
+                    return {
+                      ...item,
+                      deliveredQuantity,
+                      pendingQuantity: Math.max(0, item.requestedQuantity - deliveredQuantity)
+                    };
+                  });
+                  if (verifiedItems.length === 0) {
+                    toast.error('No GRN items found', {
+                      description: 'This purchase order has no line items available to receive.'
+                    });
+                    return;
+                  }
+                  if (!verifiedItems.some(item => item.deliveredQuantity > 0)) {
+                    toast.error('Enter received quantity', {
+                      description: 'At least one item must have a received quantity greater than zero.'
+                    });
+                    return;
+                  }
+                  setIsPostingGrn(true);
+                  try {
+                    await onReceivedAndVerified({
+                      ...pendingGrnRequest,
+                      status: 'delivered',
+                      goodsReceivingNote: grnDetails.goodsReceivingNote.trim() || pendingGrnRequest.goodsReceivingNote || `GRN-${Date.now()}`,
+                      deliveryNote: grnDetails.deliveryNote.trim() || pendingGrnRequest.deliveryNote,
+                      receivingLocation: grnDetails.receivingLocation.trim() || 'Main Store',
+                      receivingNotes: grnDetails.receivingNotes.trim() || undefined,
+                      quantityDelivered: verifiedItems.reduce((sum, item) => sum + item.deliveredQuantity, 0),
+                      quantityPending: verifiedItems.reduce((sum, item) => sum + item.pendingQuantity, 0),
+                      orderItems: verifiedItems
+                    });
+                    pushNotification(
+                      'Stock received',
+                      verifiedItems.map(item => `${item.productName} +${item.deliveredQuantity}`).join(', '),
+                      'green'
+                    );
+                  } catch (error) {
+                    toast.error('GRN could not be posted', {
+                      description: error instanceof Error ? error.message : 'Receive and verify failed.'
+                    });
+                  } finally {
+                    setIsPostingGrn(false);
+                  }
+                }}
+                >
+                  {isPostingGrn ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Posting GRN</span>
+                    </>
+                  ) : (
+                    <>
+                      <PackageCheck className="h-4 w-4" />
+                      <span>Receive and Verify</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

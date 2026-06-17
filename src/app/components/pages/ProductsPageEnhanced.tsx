@@ -39,6 +39,12 @@ export interface Product {
   supplierId?: number;
   supplierName?: string;
   supplierSku?: string;
+  expiryDate?: string;
+  quantityLevels?: Array<{
+    quantity: number;
+    label: string;
+    prices: Partial<Record<PricingTier, number>>;
+  }>;
   image: string;
   tax: number;
 }
@@ -54,7 +60,7 @@ interface ProductsPageEnhancedProps {
 
 const mapLiveProduct = (product: POSProduct): Product => {
   const retail = product.prices.retail || 0;
-  const buyingPrice = Math.max(retail * 0.65, 0);
+  const buyingPrice = product.costPrice || Math.max(retail * 0.65, 0);
 
   return {
     id: product.id,
@@ -74,6 +80,7 @@ const mapLiveProduct = (product: POSProduct): Product => {
     reorderLevel: 5,
     supplierId: product.supplierId,
     supplierName: product.supplierName,
+    quantityLevels: product.quantityLevels,
     image: product.image,
     tax: product.tax
   };

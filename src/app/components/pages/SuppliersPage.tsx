@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -55,10 +55,114 @@ interface SuppliersPageProps {
   supplierInvoices: SupplierOrderInvoice[];
   reorderRequest?: ReorderRequest | null;
   onSupplierCreated: (supplier: Omit<BackendSupplier, 'id'>) => Promise<void>;
-  onSupplierOrderCreated: (invoice: Omit<SupplierOrderInvoice, 'id'>) => void;
+  onSupplierOrderSent: (invoice: Omit<SupplierOrderInvoice, 'id'>) => Promise<void>;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
+const supplierImportColumns = ['name', 'phone', 'email', 'contact_person', 'supplier_type', 'address_line1', 'city', 'county', 'country', 'payment_terms', 'notes'];
+
+const parseCsvLine = (line: string) => {
+  const values: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    const nextCharacter = line[index + 1];
+
+    if (character === '"' && inQuotes && nextCharacter === '"') {
+      current += '"';
+      index += 1;
+    } else if (character === '"') {
+      inQuotes = !inQuotes;
+    } else if (character === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += character;
+    }
+  }
+
+  values.push(current.trim());
+  return values;
+};
+
+const parseSupplierCsv = (text: string) => {
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = parseCsvLine(lines[0]).map(header => header.trim().toLowerCase());
+  return lines.slice(1).map((line) => {
+    const values = parseCsvLine(line);
+    return headers.reduce<Record<string, string>>((row, header, index) => {
+      row[header] = values[index]?.trim() || '';
+      return row;
+    }, {});
+  });
+};
+const eastAfricaLocations = {
+  Kenya: {
+    regions: [
+      'Baringo', 'Bomet', 'Bungoma', 'Busia', 'Elgeyo-Marakwet', 'Embu', 'Garissa', 'Homa Bay', 'Isiolo', 'Kajiado',
+      'Kakamega', 'Kericho', 'Kiambu', 'Kilifi', 'Kirinyaga', 'Kisii', 'Kisumu', 'Kitui', 'Kwale', 'Laikipia',
+      'Lamu', 'Machakos', 'Makueni', 'Mandera', 'Marsabit', 'Meru', 'Migori', 'Mombasa', 'Muranga', 'Nairobi',
+      'Nakuru', 'Nandi', 'Narok', 'Nyamira', 'Nyandarua', 'Nyeri', 'Samburu', 'Siaya', 'Taita Taveta', 'Tana River',
+      'Tharaka Nithi', 'Trans Nzoia', 'Turkana', 'Uasin Gishu', 'Vihiga', 'Wajir', 'West Pokot'
+    ],
+    cities: ['Nairobi', 'Mombasa', 'Kisumu', 'Nakuru', 'Eldoret', 'Thika', 'Malindi', 'Kitale', 'Garissa', 'Nyeri', 'Machakos', 'Meru']
+  },
+  Uganda: {
+    regions: ['Central', 'Eastern', 'Northern', 'Western'],
+    cities: ['Kampala', 'Entebbe', 'Jinja', 'Mbarara', 'Gulu', 'Mbale', 'Arua', 'Fort Portal', 'Masaka', 'Lira']
+  },
+  Tanzania: {
+    regions: ['Arusha', 'Dar es Salaam', 'Dodoma', 'Geita', 'Iringa', 'Kagera', 'Kilimanjaro', 'Mbeya', 'Morogoro', 'Mwanza', 'Pwani', 'Tanga', 'Zanzibar'],
+    cities: ['Dar es Salaam', 'Dodoma', 'Arusha', 'Mwanza', 'Mbeya', 'Morogoro', 'Tanga', 'Zanzibar City', 'Moshi', 'Iringa']
+  },
+  Rwanda: {
+    regions: ['Kigali City', 'Eastern Province', 'Northern Province', 'Southern Province', 'Western Province'],
+    cities: ['Kigali', 'Butare', 'Gisenyi', 'Ruhengeri', 'Kibuye', 'Cyangugu', 'Byumba', 'Rwamagana']
+  },
+  Burundi: {
+    regions: ['Bubanza', 'Bujumbura Mairie', 'Bujumbura Rural', 'Bururi', 'Gitega', 'Muyinga', 'Ngozi', 'Rumonge'],
+    cities: ['Bujumbura', 'Gitega', 'Ngozi', 'Rumonge', 'Muyinga', 'Bururi']
+  },
+  'South Sudan': {
+    regions: ['Central Equatoria', 'Eastern Equatoria', 'Jonglei', 'Lakes', 'Northern Bahr el Ghazal', 'Unity', 'Upper Nile', 'Warrap', 'Western Bahr el Ghazal', 'Western Equatoria'],
+    cities: ['Juba', 'Wau', 'Malakal', 'Bor', 'Yei', 'Aweil', 'Rumbek', 'Torit']
+  },
+  Somalia: {
+    regions: ['Banadir', 'Bari', 'Gedo', 'Hiran', 'Lower Juba', 'Lower Shabelle', 'Nugal', 'Sanaag', 'Togdheer', 'Woqooyi Galbeed'],
+    cities: ['Mogadishu', 'Hargeisa', 'Kismayo', 'Bosaso', 'Garowe', 'Baidoa', 'Berbera']
+  },
+  'Democratic Republic of the Congo': {
+    regions: ['Kinshasa', 'Kongo Central', 'Kwilu', 'Kasai', 'Kasai Central', 'Kasai Oriental', 'Haut-Katanga', 'North Kivu', 'South Kivu', 'Ituri', 'Tshopo'],
+    cities: ['Kinshasa', 'Lubumbashi', 'Goma', 'Kisangani', 'Bukavu', 'Matadi', 'Kananga', 'Mbuji-Mayi']
+  },
+  Ethiopia: {
+    regions: ['Addis Ababa', 'Afar', 'Amhara', 'Benishangul-Gumuz', 'Dire Dawa', 'Gambela', 'Harari', 'Oromia', 'Sidama', 'Somali', 'Tigray'],
+    cities: ['Addis Ababa', 'Dire Dawa', 'Mekelle', 'Gondar', 'Bahir Dar', 'Hawassa', 'Adama', 'Jimma']
+  },
+  Djibouti: {
+    regions: ['Ali Sabieh', 'Arta', 'Dikhil', 'Djibouti', 'Obock', 'Tadjourah'],
+    cities: ['Djibouti City', 'Ali Sabieh', 'Tadjourah', 'Dikhil', 'Obock', 'Arta']
+  },
+  Eritrea: {
+    regions: ['Anseba', 'Debub', 'Gash-Barka', 'Maekel', 'Northern Red Sea', 'Southern Red Sea'],
+    cities: ['Asmara', 'Keren', 'Massawa', 'Assab', 'Mendefera', 'Barentu']
+  },
+  Comoros: {
+    regions: ['Grande Comore', 'Anjouan', 'Moheli'],
+    cities: ['Moroni', 'Mutsamudu', 'Fomboni', 'Domoni']
+  },
+  Seychelles: {
+    regions: ['Mahe', 'Praslin', 'La Digue'],
+    cities: ['Victoria', 'Anse Boileau', 'Beau Vallon', 'Baie Sainte Anne']
+  }
+} satisfies Record<string, { regions: string[]; cities: string[] }>;
+
+const eastAfricaCountries = Object.keys(eastAfricaLocations);
+
 const getSuggestedReorderQuantity = (product?: POSProduct) => {
   if (!product) return 1;
   const reorderLevel = product.reorderLevel || 10;
@@ -70,15 +174,46 @@ const getSuggestedReorderAmount = (product?: POSProduct, quantity = 1) => {
 };
 const parseSupplierAmount = (value: string) => Number(value.replace(/,/g, '')) || 0;
 
-export function SuppliersPage({ products, suppliers: backendSuppliers, supplierInvoices, reorderRequest, onSupplierCreated, onSupplierOrderCreated }: SuppliersPageProps) {
+type PurchaseOrderLineForm = {
+  productId: string;
+  productName: string;
+  sku: string;
+  supplierSku: string;
+  requestedQuantity: string;
+  receivedQuantity: string;
+  unitCost: string;
+};
+
+const buildPurchaseOrderLine = (product?: POSProduct, quantity = 1): PurchaseOrderLineForm => {
+  const unitCost = product?.costPrice || product?.prices.wholesale || (product?.prices.retail ? product.prices.retail * 0.7 : 0);
+  return {
+    productId: product?.id || '',
+    productName: product?.name || 'Product',
+    sku: product?.sku || '',
+    supplierSku: product?.supplierSku || product?.sku || '',
+    requestedQuantity: String(Math.max(1, quantity)),
+    receivedQuantity: '',
+    unitCost: unitCost ? String(Number(unitCost.toFixed(2))) : ''
+  };
+};
+
+export function SuppliersPage({ products, suppliers: backendSuppliers, supplierInvoices, reorderRequest, onSupplierCreated, onSupplierOrderSent }: SuppliersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'withBalance' | 'withOrders'>('all');
   const [supplierStatusFilter, setSupplierStatusFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [supplierImportFile, setSupplierImportFile] = useState<File | null>(null);
+  const [supplierImportMessage, setSupplierImportMessage] = useState('');
+  const [supplierImportErrors, setSupplierImportErrors] = useState<string[]>([]);
+  const [isImportingSuppliers, setIsImportingSuppliers] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<SupplierSummary | null>(null);
   const [orderSupplier, setOrderSupplier] = useState<SupplierSummary | null>(null);
   const [progressDialog, setProgressDialog] = useState<'grn' | 'details' | null>(null);
   const [isSavingSupplier, setIsSavingSupplier] = useState(false);
+  const [isSendingPurchaseOrder, setIsSendingPurchaseOrder] = useState(false);
+  const [supplierSaveError, setSupplierSaveError] = useState('');
   const [supplierForm, setSupplierForm] = useState({
     name: '',
     code: '',
@@ -131,6 +266,8 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
     paymentMethod: 'Credit',
     status: 'requested' as SupplierOrderStatus
   });
+  const [orderLines, setOrderLines] = useState<PurchaseOrderLineForm[]>([]);
+  const locationOptions = eastAfricaLocations[supplierForm.country as keyof typeof eastAfricaLocations] || eastAfricaLocations.Kenya;
 
   const invoiceSummaries = supplierInvoices.reduce((map, invoice) => {
       const existing = map.get(invoice.supplierId);
@@ -236,13 +373,16 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
 
   const openOrderDialog = (supplier: SupplierSummary) => {
     const defaultProduct = products[0];
+    const defaultQuantity = getSuggestedReorderQuantity(defaultProduct);
+    const defaultLine = buildPurchaseOrderLine(defaultProduct, defaultQuantity);
     setOrderSupplier(supplier);
+    setOrderLines(defaultProduct ? [defaultLine] : []);
     setOrderForm({
       date: today(),
-      amount: '',
+      amount: defaultLine.unitCost ? String(Number(defaultLine.unitCost) * defaultQuantity) : '',
       items: '1',
       productId: defaultProduct?.id || '',
-      quantityRequested: String(getSuggestedReorderQuantity(defaultProduct)),
+      quantityRequested: String(defaultQuantity),
       quantityDelivered: '',
       deliveryNote: '',
       goodsReceivingNote: '',
@@ -262,11 +402,19 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
 
     setSelectedSupplier(null);
     setOrderSupplier(requestedSupplier);
-    const suggestedQuantity = reorderRequest.suggestedQuantity || getSuggestedReorderQuantity(requestedProduct);
+    const requestItems = reorderRequest.items?.length
+      ? reorderRequest.items
+      : [{ productId: reorderRequest.productId, quantity: reorderRequest.suggestedQuantity || getSuggestedReorderQuantity(requestedProduct) }];
+    const nextLines = requestItems
+      .map(item => buildPurchaseOrderLine(products.find(product => product.id === item.productId), item.quantity))
+      .filter(line => line.productId);
+    setOrderLines(nextLines);
+    const suggestedQuantity = nextLines.reduce((sum, line) => sum + (Number(line.requestedQuantity) || 0), 0) || reorderRequest.suggestedQuantity || getSuggestedReorderQuantity(requestedProduct);
+    const suggestedAmount = nextLines.reduce((sum, line) => sum + ((Number(line.requestedQuantity) || 0) * (Number(line.unitCost) || 0)), 0);
     setOrderForm({
       date: today(),
-      amount: reorderRequest.suggestedAmount ? String(reorderRequest.suggestedAmount) : getSuggestedReorderAmount(requestedProduct, suggestedQuantity),
-      items: '1',
+      amount: suggestedAmount ? String(Number(suggestedAmount.toFixed(2))) : reorderRequest.suggestedAmount ? String(reorderRequest.suggestedAmount) : getSuggestedReorderAmount(requestedProduct, suggestedQuantity),
+      items: String(Math.max(1, nextLines.length)),
       productId: requestedProduct?.id || '',
       quantityRequested: String(suggestedQuantity),
       quantityDelivered: '',
@@ -319,7 +467,11 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
   });
 
   const handleCreateSupplier = async () => {
-    if (!supplierForm.name.trim() || !supplierForm.phone.trim()) return;
+    setSupplierSaveError('');
+    if (!supplierForm.name.trim() || !supplierForm.phone.trim()) {
+      setSupplierSaveError('Supplier name and phone number are required.');
+      return;
+    }
 
     setIsSavingSupplier(true);
     try {
@@ -362,51 +514,188 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
       });
       resetSupplierForm();
       setIsAddDialogOpen(false);
+    } catch (error) {
+      setSupplierSaveError(error instanceof Error ? error.message : 'Supplier could not be saved.');
     } finally {
       setIsSavingSupplier(false);
     }
   };
 
-  const handleCreateOrder = () => {
-    if (!orderSupplier) return;
+  const resetSupplierImport = () => {
+    setSupplierImportFile(null);
+    setSupplierImportMessage('');
+    setSupplierImportErrors([]);
+    if (importInputRef.current) importInputRef.current.value = '';
+  };
 
-    const amount = Number(orderForm.amount);
-    const items = Math.max(1, Number(orderForm.items) || 1);
-    const quantityRequested = Math.max(1, Number(orderForm.quantityRequested) || 1);
-    const rawDelivered = Number(orderForm.quantityDelivered);
-    const quantityDelivered = orderForm.status === 'delivered'
-      ? Math.max(0, Math.min(quantityRequested, Number.isFinite(rawDelivered) ? rawDelivered : quantityRequested))
+  const handleImportSuppliers = async () => {
+    setSupplierImportMessage('');
+    setSupplierImportErrors([]);
+
+    if (!supplierImportFile) {
+      setSupplierImportErrors(['Choose a CSV file first.']);
+      return;
+    }
+
+    if (!supplierImportFile.name.toLowerCase().endsWith('.csv')) {
+      setSupplierImportErrors(['Supplier import currently supports CSV files.']);
+      return;
+    }
+
+    setIsImportingSuppliers(true);
+    try {
+      const rows = parseSupplierCsv(await supplierImportFile.text());
+      if (rows.length === 0) {
+        setSupplierImportErrors(['The CSV file has no supplier rows.']);
+        return;
+      }
+
+      const errors: string[] = [];
+      let created = 0;
+
+      for (const [index, row] of rows.entries()) {
+        const rowNumber = index + 2;
+        const name = row.name || row.supplier || row.supplier_name || '';
+        const phone = row.phone || row.phone_number || row.contact_phone || '';
+
+        if (!name.trim() || !phone.trim()) {
+          errors.push(`Row ${rowNumber}: supplier name and phone are required.`);
+          continue;
+        }
+
+        try {
+          await onSupplierCreated({
+            name: name.trim(),
+            code: row.code || '',
+            phone: phone.trim(),
+            email: row.email || '',
+            contact_person: row.contact_person || row.contact || '',
+            designation: row.designation || '',
+            supplier_type: row.supplier_type || '',
+            supplier_category: row.supplier_category || '',
+            registration_number: row.registration_number || '',
+            tax_number: row.tax_number || '',
+            website: row.website || '',
+            address: row.address || row.address_line1 || '',
+            address_line1: row.address_line1 || row.address || '',
+            address_line2: row.address_line2 || '',
+            city: row.city || '',
+            county: row.county || '',
+            postal_code: row.postal_code || '',
+            country: row.country || 'Kenya',
+            payment_terms: Number(row.payment_terms) || 30,
+            currency: row.currency || 'KES',
+            credit_limit: parseSupplierAmount(row.credit_limit || ''),
+            preferred_payment_method: row.preferred_payment_method || '',
+            bank_name: row.bank_name || '',
+            bank_account: row.bank_account || '',
+            mpesa_paybill: row.mpesa_paybill || '',
+            mpesa_till: row.mpesa_till || '',
+            default_warehouse: row.default_warehouse || '',
+            minimum_order_amount: parseSupplierAmount(row.minimum_order_amount || ''),
+            lead_time_days: Number(row.lead_time_days) || 0,
+            notes: row.notes || '',
+            is_active: row.is_active ? row.is_active.toLowerCase() !== 'false' : true,
+            is_preferred: row.is_preferred ? row.is_preferred.toLowerCase() === 'true' : false,
+            uploaded_documents: []
+          });
+          created += 1;
+        } catch (error) {
+          errors.push(`Row ${rowNumber}: ${error instanceof Error ? error.message : 'could not be imported.'}`);
+        }
+      }
+
+      setSupplierImportErrors(errors);
+      setSupplierImportMessage(`Imported ${created} supplier${created === 1 ? '' : 's'}.`);
+      if (created > 0 && errors.length === 0) {
+        resetSupplierImport();
+        setIsImportDialogOpen(false);
+      }
+    } finally {
+      setIsImportingSuppliers(false);
+    }
+  };
+
+  const updateOrderLine = (index: number, changes: Partial<PurchaseOrderLineForm>) => {
+    setOrderLines(previousLines => previousLines.map((line, lineIndex) => (
+      lineIndex === index ? { ...line, ...changes } : line
+    )));
+  };
+
+  const orderLineItems = orderLines.map(line => {
+    const requestedQuantity = Math.max(0, Number(line.requestedQuantity) || 0);
+    const deliveredQuantity = orderForm.status === 'delivered'
+      ? Math.min(requestedQuantity, Math.max(0, Number(line.receivedQuantity || line.requestedQuantity) || 0))
       : 0;
-    const deliveredProduct = products.find(product => product.id === orderForm.productId) || products[0];
-    if (!amount || amount <= 0) return;
-    const unitCost = amount / quantityRequested;
+    const unitCost = Math.max(0, Number(line.unitCost) || 0);
+    return {
+      ...line,
+      requestedQuantity,
+      deliveredQuantity,
+      pendingQuantity: Math.max(0, requestedQuantity - deliveredQuantity),
+      unitCost,
+      lineTotal: requestedQuantity * unitCost
+    };
+  });
+  const orderTotal = orderLineItems.reduce((sum, line) => sum + line.lineTotal, 0);
+  const orderRequestedQuantity = orderLineItems.reduce((sum, line) => sum + line.requestedQuantity, 0);
+  const orderDeliveredQuantity = orderLineItems.reduce((sum, line) => sum + line.deliveredQuantity, 0);
 
-    onSupplierOrderCreated({
-      supplierId: orderSupplier.id,
-      supplierName: orderSupplier.name,
-      contact: orderSupplier.contact,
+  const handleEmailSupplier = () => {
+    if (!orderSupplier) return;
+    if (onSupplierOrderSent) {
+      setIsSendingPurchaseOrder(true);
+      onSupplierOrderSent(buildOrderInvoice('requested'))
+        .then(() => {
+          setOrderSupplier(null);
+          setOrderLines([]);
+        })
+        .catch((error) => {
+          alert(error instanceof Error ? error.message : 'Purchase order could not be emailed.');
+        })
+        .finally(() => setIsSendingPurchaseOrder(false));
+      return;
+    }
+    const subject = encodeURIComponent(`Purchase Order - ${orderForm.date || today()}`);
+    const body = encodeURIComponent(`Hello ${orderSupplier.name},\n\nPlease find the purchase order summary below. A PDF/download copy can be generated from the POS admin dashboard.\n\nItems:\n${orderLineItems.map(line => `- ${line.productName} (${line.supplierSku || line.sku}): ${line.requestedQuantity} x ${formatCurrency(line.unitCost)} = ${formatCurrency(line.lineTotal)}`).join('\n')}\n\nTotal: ${formatCurrency(orderTotal)}\n\nRegards`);
+    window.location.href = `mailto:${orderSupplier.email || ''}?subject=${subject}&body=${body}`;
+  };
+
+  const buildOrderInvoice = (status: SupplierOrderStatus = orderForm.status): Omit<SupplierOrderInvoice, 'id'> => {
+    const amount = Number(orderTotal.toFixed(2));
+    const items = Math.max(1, orderLineItems.length);
+    const quantityRequested = Math.max(1, orderRequestedQuantity);
+    const quantityDelivered = status === 'delivered' ? orderDeliveredQuantity : 0;
+    const deliveredProduct = products.find(product => product.id === (orderLineItems[0]?.productId || orderForm.productId)) || products[0];
+    const nextGrnNumber = status === 'delivered' ? orderForm.goodsReceivingNote.trim() || `GRN-${Date.now()}` : undefined;
+
+    return {
+      supplierId: orderSupplier!.id,
+      supplierName: orderSupplier!.name,
+      contact: orderSupplier!.contact,
       date: orderForm.date || today(),
       amount,
-      status: orderForm.status,
+      status,
       items,
       paymentMethod: orderForm.paymentMethod,
       deliveryNote: orderForm.deliveryNote.trim() || undefined,
-      goodsReceivingNote: orderForm.status === 'delivered' ? orderForm.goodsReceivingNote.trim() || `GRN-${Date.now()}` : undefined,
       productId: deliveredProduct?.id,
       productName: deliveredProduct?.name,
       quantityRequested,
       quantityDelivered,
       quantityPending: Math.max(0, quantityRequested - quantityDelivered),
-      orderItems: deliveredProduct ? [{
-        productId: deliveredProduct.id,
-        productName: deliveredProduct.name,
-        requestedQuantity: quantityRequested,
-        deliveredQuantity: quantityDelivered,
-        pendingQuantity: Math.max(0, quantityRequested - quantityDelivered),
-        unitCost
-      }] : []
-    });
-    setOrderSupplier(null);
+      orderItems: orderLineItems.map(line => ({
+        productId: line.productId,
+        productName: line.productName,
+        sku: line.sku,
+        supplierSku: line.supplierSku,
+        requestedQuantity: line.requestedQuantity,
+        deliveredQuantity: line.deliveredQuantity,
+        pendingQuantity: line.pendingQuantity,
+        unitCost: line.unitCost
+      })),
+      goodsReceivingNote: nextGrnNumber
+    };
   };
 
   return (
@@ -417,7 +706,10 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
           <p className="text-gray-500">Manage supplier contacts, orders, balances, and receiving activity</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+            setSupplierSaveError('');
+            setIsAddDialogOpen(open);
+          }}>
             <DialogTrigger asChild>
               <Button className="bg-blue-600 hover:bg-blue-700 text-white">
                 <Plus className="w-4 h-4 mr-2" />
@@ -525,17 +817,20 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-600">City <span className="text-red-500">*</span></label>
-                          <Input placeholder="e.g. Nairobi" value={supplierForm.city} onChange={(e) => setSupplierForm({ ...supplierForm, city: e.target.value })} className="bg-gray-100 border-gray-200 text-gray-900" />
+                          <select value={supplierForm.city} onChange={(e) => setSupplierForm({ ...supplierForm, city: e.target.value })} className="h-9 w-full rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900">
+                            <option value="">Select city</option>
+                            {locationOptions.cities.map(city => (
+                              <option key={city} value={city}>{city}</option>
+                            ))}
+                          </select>
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-600">State / County <span className="text-red-500">*</span></label>
                           <select value={supplierForm.county} onChange={(e) => setSupplierForm({ ...supplierForm, county: e.target.value })} className="h-9 w-full rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900">
                             <option value="">Select state / county</option>
-                            <option>Nairobi</option>
-                            <option>Kiambu</option>
-                            <option>Mombasa</option>
-                            <option>Nakuru</option>
-                            <option>Kisumu</option>
+                            {locationOptions.regions.map(region => (
+                              <option key={region} value={region}>{region}</option>
+                            ))}
                           </select>
                         </div>
                         <div>
@@ -544,11 +839,14 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                         </div>
                         <div>
                           <label className="mb-2 block text-sm font-medium text-gray-600">Country <span className="text-red-500">*</span></label>
-                          <select value={supplierForm.country} onChange={(e) => setSupplierForm({ ...supplierForm, country: e.target.value })} className="h-9 w-full rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900">
-                            <option>Kenya</option>
-                            <option>Uganda</option>
-                            <option>Tanzania</option>
-                            <option>Rwanda</option>
+                          <select
+                            value={supplierForm.country}
+                            onChange={(e) => setSupplierForm({ ...supplierForm, country: e.target.value, county: '', city: '' })}
+                            className="h-9 w-full rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
+                          >
+                            {eastAfricaCountries.map(country => (
+                              <option key={country} value={country}>{country}</option>
+                            ))}
                           </select>
                         </div>
                       </div>
@@ -713,17 +1011,64 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                 </div>
               </div>
               <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white px-6 py-4">
+                {supplierSaveError && (
+                  <p className="mr-auto self-center text-sm text-red-600">{supplierSaveError}</p>
+                )}
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
-                <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleCreateSupplier} disabled={isSavingSupplier || !supplierForm.name.trim() || !supplierForm.phone.trim() || !supplierForm.contact_person.trim() || !supplierForm.email.trim()}>
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleCreateSupplier} disabled={isSavingSupplier || !supplierForm.name.trim() || !supplierForm.phone.trim()}>
                   {isSavingSupplier ? 'Saving...' : 'Save Supplier'}
                 </Button>
               </div>
             </DialogContent>
           </Dialog>
-          <Button variant="outline">
-            <Upload className="w-4 h-4 mr-2" />
-            Import
-          </Button>
+          <Dialog open={isImportDialogOpen} onOpenChange={(open) => {
+            setIsImportDialogOpen(open);
+            if (!open && !isImportingSuppliers) resetSupplierImport();
+          }}>
+            <DialogTrigger asChild>
+              <Button variant="outline">
+                <Upload className="w-4 h-4 mr-2" />
+                Import
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-white border-gray-200 max-w-lg">
+              <DialogHeader>
+                <DialogTitle className="text-gray-900">Import Suppliers</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+                  Upload a CSV file. Required columns are <strong>name</strong> and <strong>phone</strong>.
+                </div>
+                <Input
+                  ref={importInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="bg-gray-100 border-gray-200"
+                  onChange={(event) => {
+                    setSupplierImportFile(event.target.files?.[0] || null);
+                    setSupplierImportMessage('');
+                    setSupplierImportErrors([]);
+                  }}
+                />
+                <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-sm font-medium text-gray-900">Supported columns</p>
+                  <p className="mt-1 text-xs text-gray-500">{supplierImportColumns.join(', ')}</p>
+                </div>
+                {supplierImportMessage && <p className="text-sm text-green-700">{supplierImportMessage}</p>}
+                {supplierImportErrors.length > 0 && (
+                  <div className="max-h-36 overflow-y-auto rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {supplierImportErrors.map(error => <p key={error}>{error}</p>)}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Button className="flex-1 bg-blue-600 hover:bg-blue-700 text-white" onClick={handleImportSuppliers} disabled={isImportingSuppliers}>
+                    {isImportingSuppliers ? 'Importing...' : 'Import Suppliers'}
+                  </Button>
+                  <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} disabled={isImportingSuppliers}>Cancel</Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -1213,9 +1558,9 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
 
       {orderSupplier && (
         <Dialog open={!!orderSupplier} onOpenChange={() => setOrderSupplier(null)}>
-          <DialogContent className="bg-white border-gray-200 max-w-md">
+          <DialogContent className="bg-white border-gray-200 max-w-5xl">
             <DialogHeader>
-              <DialogTitle className="text-gray-900">Record Supplier Order</DialogTitle>
+              <DialogTitle className="text-gray-900">Purchase Order</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div>
@@ -1249,75 +1594,58 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                   onChange={(e) => setOrderForm({ ...orderForm, date: e.target.value })}
                   className="bg-gray-100 border-gray-200 text-gray-900"
                 />
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="Items"
-                  value={orderForm.items}
-                  onChange={(e) => setOrderForm({ ...orderForm, items: e.target.value })}
-                  className="bg-gray-100 border-gray-200 text-gray-900"
-                />
+                <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-right">
+                  <p className="text-xs text-gray-500">PO Total</p>
+                  <p className="font-semibold text-gray-900">{formatCurrency(orderTotal)}</p>
+                </div>
               </div>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Order amount"
-                value={orderForm.amount}
-                onChange={(e) => setOrderForm({ ...orderForm, amount: e.target.value })}
-                className="bg-gray-100 border-gray-200 text-gray-900"
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <select
-                  value={orderForm.productId}
-                  onChange={(e) => setOrderForm({ ...orderForm, productId: e.target.value })}
-                  className="h-9 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
-                >
-                  {products.map(product => (
-                    <option key={product.id} value={product.id}>
-                      {product.name}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  type="number"
-                  min="1"
-                  placeholder="Qty requested"
-                  value={orderForm.quantityRequested}
-                  onChange={(e) => {
-                    const quantityRequested = Number(e.target.value) || 1;
-                    setOrderForm({
-                      ...orderForm,
-                      quantityRequested: e.target.value,
-                      amount: getSuggestedReorderAmount(products.find(product => product.id === orderForm.productId), quantityRequested)
-                    });
-                  }}
-                  className="bg-gray-100 border-gray-200 text-gray-900"
-                />
+
+              <div className="rounded-md border border-gray-200">
+                <div className="flex flex-col gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">PO Items Requested</p>
+                    <p className="text-xs text-gray-500">Review quantities and supplier prices before sending.</p>
+                  </div>
+                  <Button type="button" className="bg-blue-600 text-white hover:bg-blue-700" onClick={handleEmailSupplier} disabled={isSendingPurchaseOrder || !orderSupplier.email}>
+                    <Send className="mr-2 h-4 w-4" />
+                    {isSendingPurchaseOrder ? 'Sending...' : 'Send to Supplier'}
+                  </Button>
+                </div>
+                <div className="grid grid-cols-[1.5fr_.8fr_.9fr_.7fr_.8fr_.8fr] gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                  <span>Item</span>
+                  <span>SKU</span>
+                  <span>Supplier SKU</span>
+                  <span>Qty</span>
+                  <span>Unit cost</span>
+                  <span className="text-right">Total</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto">
+                  {orderLines.map((line, index) => {
+                    const calculatedLine = orderLineItems[index];
+                    return (
+                      <div key={`${line.productId}-${index}`} className="grid grid-cols-[1.5fr_.8fr_.9fr_.7fr_.8fr_.8fr] gap-2 border-b border-gray-100 px-3 py-3 text-sm last:border-b-0">
+                        <div>
+                          <p className="font-medium text-gray-900">{line.productName}</p>
+                          <p className="text-xs text-gray-500">{products.find(product => product.id === line.productId)?.supplierName || orderSupplier.name}</p>
+                        </div>
+                        <p className="self-center text-gray-600">{line.sku}</p>
+                        <Input value={line.supplierSku} onChange={(e) => updateOrderLine(index, { supplierSku: e.target.value })} className="h-8 bg-white border-gray-200" />
+                        <Input type="number" min="1" value={line.requestedQuantity} onChange={(e) => updateOrderLine(index, { requestedQuantity: e.target.value })} className="h-8 bg-white border-gray-200" />
+                        <Input type="number" min="0" step="0.01" value={line.unitCost} onChange={(e) => updateOrderLine(index, { unitCost: e.target.value })} className="h-8 bg-white border-gray-200" />
+                        <p className="self-center text-right font-medium text-gray-900">{formatCurrency(calculatedLine?.lineTotal || 0)}</p>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  type="number"
-                  min="0"
-                  placeholder="Qty delivered"
-                  value={orderForm.quantityDelivered}
-                  onChange={(e) => setOrderForm({ ...orderForm, quantityDelivered: e.target.value })}
-                  className="bg-gray-100 border-gray-200 text-gray-900"
-                />
-                <Input
-                  placeholder="Goods receiving note"
-                  value={orderForm.goodsReceivingNote}
-                  onChange={(e) => setOrderForm({ ...orderForm, goodsReceivingNote: e.target.value })}
-                  className="bg-gray-100 border-gray-200 text-gray-900"
-                />
-              </div>
+
               <Input
                 placeholder="Supplier delivery note"
                 value={orderForm.deliveryNote}
                 onChange={(e) => setOrderForm({ ...orderForm, deliveryNote: e.target.value })}
                 className="bg-gray-100 border-gray-200 text-gray-900"
               />
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <select
                   value={orderForm.paymentMethod}
                   onChange={(e) => setOrderForm({ ...orderForm, paymentMethod: e.target.value })}
@@ -1328,21 +1656,9 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                   <option>Bank Transfer</option>
                   <option>Check</option>
                 </select>
-                <select
-                  value={orderForm.status}
-                  onChange={(e) => setOrderForm({ ...orderForm, status: e.target.value as SupplierOrderStatus })}
-                  className="h-9 rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
-                >
-                  <option value="requested">Requested</option>
-                  <option value="pending">Pending</option>
-                  <option value="delivered">Delivered</option>
-                </select>
               </div>
               <div className="flex gap-2">
-                <Button className="flex-1" onClick={handleCreateOrder}>
-                  {orderForm.status === 'delivered' ? 'Receive Delivery Note' : `Notify ${orderSupplier.name}`}
-                </Button>
-                <Button variant="outline" onClick={() => setOrderSupplier(null)}>Cancel</Button>
+                <Button variant="outline" className="flex-1" onClick={() => setOrderSupplier(null)}>Cancel</Button>
               </div>
             </div>
           </DialogContent>

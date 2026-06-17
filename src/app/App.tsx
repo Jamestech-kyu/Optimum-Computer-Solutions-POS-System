@@ -18,13 +18,22 @@ import { UserRole } from './types/auth';
 import type { QuickActionId } from './components/QuickActions';
 import type { Product } from './components/pages/ProductsPageEnhanced';
 import { BusinessExpense, ReorderRequest, StockMovement, SupplierOrderInvoice } from './types/supplierOrder';
-import { approveUser, createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, rejectUser, saveDayBalance, saveSale, saveSupplierInvoice, updateProductStock, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
+import { approveUser, changePassword, clockInUser, clockOutUser, createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, receiveAndVerifySupplierInvoice, rejectUser, saveDayBalance, saveSale, saveSupplierInvoice, sendSupplierInvoiceToSupplier, updateProductStock, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
 import type { BackendCustomer, BackendRole, BackendSupplier, BackendUser, CreateCustomerInput, LoginResult, RegistrationRole } from './services/api';
 import { toast } from 'sonner';
 import { canAccessModule, firstAccessibleModule, normalizeRole, type AppModuleId } from './services/permissions';
 
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
 const LOCAL_NOTIFICATION_STORAGE_KEY = 'pos-local-notifications';
+const PENDING_REORDER_REQUEST_KEY = 'pos-pending-reorder-request';
+const PENDING_STOCK_UPDATES_KEY = 'pos-pending-stock-updates';
+const demoExpenseSignatures = new Set([
+  'Rent|Monthly store rent|2500|2026-01-01|Bank Transfer',
+  'Utilities|Electricity bill|185.5|2026-01-15|Cash',
+  'Staff Salary|Monthly salaries|4200|2026-01-01|Bank Transfer',
+  'Equipment|Coffee machine maintenance|150|2026-01-14|Card',
+  'Marketing|Social media ads|250|2026-01-10|Card'
+]);
 const refreshNotificationBell = () => window.dispatchEvent(new Event('pos:notifications-changed'));
 const mergeSupplierInvoices = (
   currentInvoices: SupplierOrderInvoice[],
@@ -89,6 +98,14 @@ const isDrawerExpired = (balance: DayBalance) => {
   return Date.now() - new Date(balance.openedAt).getTime() >= DRAWER_AUTO_CLOSE_MS;
 };
 
+const isDemoExpense = (expense: BusinessExpense) => demoExpenseSignatures.has([
+  expense.category,
+  expense.description,
+  Number(expense.amount),
+  expense.date,
+  expense.paymentMethod
+].join('|'));
+
 export default function App() {
   const [activeItem, setActiveItem] = useState('dashboard');
   const [quickActionSignals, setQuickActionSignals] = useState({
@@ -99,6 +116,13 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false); // Set to false for login screen
   const [userRole, setUserRole] = useState<UserRole | null>(null);
   const [userName, setUserName] = useState('');
+  const [passwordResetRequired, setPasswordResetRequired] = useState(false);
+  const [passwordResetContext, setPasswordResetContext] = useState<{ userId: number; oldPassword: string } | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordResetError, setPasswordResetError] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [lastLoginPassword, setLastLoginPassword] = useState('');
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [products, setProducts] = useState(() => {
     const savedProducts = window.localStorage.getItem('pos-products');
@@ -130,7 +154,9 @@ export default function App() {
   });
   const [expenses, setExpenses] = useState<BusinessExpense[]>(() => {
     const savedExpenses = window.localStorage.getItem('pos-expenses');
-    return savedExpenses ? JSON.parse(savedExpenses) as BusinessExpense[] : [];
+    return savedExpenses
+      ? (JSON.parse(savedExpenses) as BusinessExpense[]).filter(expense => !isDemoExpense(expense))
+      : [];
   });
   const [stockMovements, setStockMovements] = useState<StockMovement[]>(() => {
     const savedStockMovements = window.localStorage.getItem('pos-stock-movements');
@@ -138,10 +164,16 @@ export default function App() {
   });
   const [users, setUsers] = useState<BackendUser[]>([]);
   const [customers, setCustomers] = useState<BackendCustomer[]>([]);
-  const [reorderRequest, setReorderRequest] = useState<ReorderRequest | null>(null);
+  const [reorderRequest, setReorderRequest] = useState<ReorderRequest | null>(() => {
+    const savedReorderRequest = window.localStorage.getItem(PENDING_REORDER_REQUEST_KEY);
+    return savedReorderRequest ? JSON.parse(savedReorderRequest) as ReorderRequest : null;
+  });
+  const [pendingInventoryGrn, setPendingInventoryGrn] = useState<SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'> | null>(null);
   const lowStockSnapshot = useRef('');
   const notifiedLowStockProductIds = useRef(new Set<string>());
-  const pendingStockUpdates = useRef(new Map<string, number>());
+  const pendingStockUpdates = useRef(new Map<string, number>(
+    Object.entries(JSON.parse(window.localStorage.getItem(PENDING_STOCK_UPDATES_KEY) || '{}') as Record<string, number>)
+  ));
   const pendingSaleDetails = useRef(new Map<string, CompletedSale>());
 
   const applyPendingStockUpdates = (nextProducts: POSProduct[]) =>
@@ -150,6 +182,13 @@ export default function App() {
         ? { ...product, stock: pendingStockUpdates.current.get(product.id)! }
         : product
     ));
+
+  const persistPendingStockUpdates = () => {
+    window.localStorage.setItem(
+      PENDING_STOCK_UPDATES_KEY,
+      JSON.stringify(Object.fromEntries(pendingStockUpdates.current.entries()))
+    );
+  };
 
   const mergeLiveSaleDetails = (backendSales: CompletedSale[]) => {
     const mergedSales = backendSales.map((sale) => {
@@ -196,6 +235,10 @@ export default function App() {
   const cashSalesToday = completedSales
     .filter(sale => sale.timestamp.toISOString().slice(0, 10) === dayBalance.date)
     .reduce((sum, sale) => sum + sale.cashAmount, 0);
+  const cashExpensesToday = expenses
+    .filter(expense => expense.date === dayBalance.date && expense.paymentMethod === 'Cash')
+    .reduce((sum, expense) => sum + expense.amount, 0);
+  const expectedCashToday = dayBalance.openingBalance + cashSalesToday - cashExpensesToday;
 
   useEffect(() => {
     if (!hasStoredSession()) {
@@ -262,7 +305,7 @@ export default function App() {
 
         const nextDayBalance = {
           ...previousBalance,
-          closingBalance: previousBalance.openingBalance + cashSalesToday,
+          closingBalance: expectedCashToday,
           status: 'closed'
         } as DayBalance;
 
@@ -277,7 +320,7 @@ export default function App() {
     closeExpiredDrawer();
     const timer = window.setInterval(closeExpiredDrawer, 60 * 1000);
     return () => window.clearInterval(timer);
-  }, [cashSalesToday, isBackendConnected]);
+  }, [expectedCashToday, isBackendConnected]);
 
   useEffect(() => {
     window.localStorage.setItem('pos-supplier-invoices', JSON.stringify(supplierInvoices));
@@ -294,6 +337,14 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem('pos-stock-movements', JSON.stringify(stockMovements));
   }, [stockMovements]);
+
+  useEffect(() => {
+    if (reorderRequest) {
+      window.localStorage.setItem(PENDING_REORDER_REQUEST_KEY, JSON.stringify(reorderRequest));
+    } else {
+      window.localStorage.removeItem(PENDING_REORDER_REQUEST_KEY);
+    }
+  }, [reorderRequest]);
 
   useEffect(() => {
     const lowStockProducts = products.filter(product => product.stock <= (product.reorderLevel || 10));
@@ -383,18 +434,82 @@ export default function App() {
     }
   };
 
+  const startRequiredPasswordReset = (username: string, role: UserRole, userId: number | undefined, oldPassword: string) => {
+    if (!userId) {
+      throw new Error('Login did not return the user id needed to reset the temporary password.');
+    }
+
+    const normalizedRole = normalizeRole(role);
+    setIsAuthenticated(true);
+    setUserRole(normalizedRole);
+    setUserName(username);
+    setActiveItem(firstAccessibleModule(normalizedRole));
+    setPasswordResetRequired(true);
+    setPasswordResetContext({ userId, oldPassword });
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setPasswordResetError('');
+  };
+
   const handleLogin = async (username: string, password: string, role: UserRole): Promise<LoginResult> => {
+    setLastLoginPassword(password);
     const result = await apiLogin(username, password);
     if (!result.twoFactorRequired) {
-      await finishAuthenticatedSession(username, (result.userRole as UserRole) || role);
+      const resultRole = (result.userRole as UserRole) || role;
+      if (result.mustChangePassword) {
+        startRequiredPasswordReset(username, resultRole, result.userId, password);
+      } else {
+        await finishAuthenticatedSession(username, resultRole);
+      }
     }
     return result;
   };
 
   const handleVerifyTwoFactor = async (username: string, code: string, role: UserRole): Promise<LoginResult> => {
     const result = await apiVerifyTwoFactor(username, code);
-    await finishAuthenticatedSession(username, (result.userRole as UserRole) || role);
+    const resultRole = (result.userRole as UserRole) || role;
+    if (result.mustChangePassword) {
+      startRequiredPasswordReset(username, resultRole, result.userId, lastLoginPassword);
+    } else {
+      await finishAuthenticatedSession(username, resultRole);
+    }
     return result;
+  };
+
+  const handleRequiredPasswordChange = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPasswordResetError('');
+
+    if (!passwordResetContext) {
+      setPasswordResetError('Password reset session is missing. Please sign in again.');
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setPasswordResetError('Passwords do not match.');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      await changePassword({
+        userId: passwordResetContext.userId,
+        oldPassword: passwordResetContext.oldPassword,
+        newPassword,
+        confirmPassword: confirmNewPassword
+      });
+      setPasswordResetRequired(false);
+      setPasswordResetContext(null);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setLastLoginPassword('');
+      toast.success('Password updated');
+      await finishAuthenticatedSession(userName, userRole!);
+    } catch (error) {
+      setPasswordResetError(error instanceof Error ? error.message : 'Password could not be updated.');
+    } finally {
+      setIsResettingPassword(false);
+    }
   };
 
   const performLogout = () => {
@@ -402,21 +517,13 @@ export default function App() {
     setIsAuthenticated(false);
     setUserRole(null);
     setUserName('');
+    setPasswordResetRequired(false);
+    setPasswordResetContext(null);
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setPasswordResetError('');
+    setLastLoginPassword('');
     setActiveItem('dashboard');
-  };
-
-  const handleLogout = () => {
-    toast.warning('Confirm logout', {
-      description: 'Are you sure you want to log out of this session?',
-      action: {
-        label: 'Logout',
-        onClick: performLogout
-      },
-      cancel: {
-        label: 'Stay',
-        onClick: () => undefined
-      }
-    });
   };
 
   const handleTransactionComplete = (sale: CompletedSale) => {
@@ -439,6 +546,7 @@ export default function App() {
       if (soldUnits === 0) return product;
 
       pendingStockUpdates.current.set(product.id, Math.max(0, product.stock - soldUnits));
+      persistPendingStockUpdates();
 
       return {
         ...product,
@@ -487,6 +595,7 @@ export default function App() {
               updateProductStock(productId, nextStock)
                 .then(() => {
                   pendingStockUpdates.current.delete(productId);
+                  persistPendingStockUpdates();
                 })
             )
           );
@@ -512,8 +621,11 @@ export default function App() {
           modelNumber: product.modelNumber,
           supplierId: product.supplierId,
           supplierName: product.supplierName,
+          expiryDate: product.expiryDate,
+          quantityLevels: product.quantityLevels,
           uom: product.uom,
           prices: product.prices,
+          costPrice: product.buyingPrice || 0,
           stock: product.stock,
           tax: product.tax,
           image: product.image || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=100&h=100&fit=crop'
@@ -544,6 +656,8 @@ export default function App() {
       quantity: product.stock || 0,
       minimum_stock: product.reorderLevel || 0,
       maximum_stock: product.maximumStock,
+      expiry_date: product.expiryDate,
+      quantity_levels: product.quantityLevels,
       tax_rate: product.tax || 0,
       image_data: product.image || '',
       notes: product.variation
@@ -560,6 +674,7 @@ export default function App() {
     };
 
     setSupplierInvoices(previousInvoices => [newInvoice, ...previousInvoices]);
+    setReorderRequest(null);
 
     if (newInvoice.status === 'requested' || newInvoice.status === 'pending') {
       const requestedSummary = newInvoice.orderItems && newInvoice.orderItems.length > 0
@@ -611,6 +726,11 @@ export default function App() {
         })),
         ...previousMovements
       ]);
+      pushLocalNotification(
+        'Stock received',
+        deliveredItems.map(item => `${item.productName} +${item.deliveredQuantity} pcs added to inventory`).join(', '),
+        `stock-received:${newInvoice.id}`
+      );
     }
 
     if (isBackendConnected) {
@@ -634,6 +754,140 @@ export default function App() {
         })
         .catch(error => console.warn('Unable to save supplier invoice to backend.', error));
     }
+  };
+
+  const handleSupplierOrderSent = async (invoice: Omit<SupplierOrderInvoice, 'id'>) => {
+    const localInvoice: SupplierOrderInvoice = {
+      ...invoice,
+      id: `SUP-INV-${Date.now()}`,
+      status: 'requested'
+    };
+
+    setSupplierInvoices(previousInvoices => [localInvoice, ...previousInvoices]);
+    setReorderRequest(null);
+
+    if (!isBackendConnected) {
+      toast.warning('Backend email unavailable', {
+        description: 'The PO was saved locally, but email sending requires the Django backend connection.'
+      });
+      return;
+    }
+
+    const sent = await sendSupplierInvoiceToSupplier(localInvoice);
+    setSupplierInvoices(previousInvoices => previousInvoices.map(existingInvoice =>
+      existingInvoice.id === localInvoice.id
+        ? {
+            ...sent.invoice,
+            status: 'requested',
+            orderItems: (localInvoice.orderItems || []).map(localItem => ({
+              ...localItem,
+              purchaseOrderItemId: sent.invoice.orderItems?.find(sentItem => sentItem.productId === localItem.productId)?.purchaseOrderItemId
+            })),
+            quantityRequested: localInvoice.quantityRequested,
+            quantityDelivered: 0,
+            quantityPending: localInvoice.quantityRequested,
+            deliveryNote: sent.downloadUrl
+          }
+        : existingInvoice
+    ));
+    pushLocalNotification(
+      'Purchase order sent',
+      sent.message,
+      `purchase-order-sent:${sent.invoice.id}`
+    );
+    toast.success('Purchase order emailed', {
+      description: `${sent.email} received the PDF attachment and download link.`
+    });
+    refreshNotificationBell();
+  };
+
+  const handleOpenInventoryGrn = (invoice: SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'>) => {
+    setPendingInventoryGrn(invoice);
+    setActiveItem('inventory');
+  };
+
+  const handleInventoryReceivedAndVerified = async (invoice: SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'>) => {
+    const deliveredInvoice: SupplierOrderInvoice = {
+      ...invoice,
+      id: 'id' in invoice ? invoice.id : `SUP-INV-${Date.now()}`,
+      status: 'delivered'
+    };
+    const deliveredItems = (deliveredInvoice.orderItems || []).filter(item => item.deliveredQuantity > 0);
+
+    if (isBackendConnected) {
+      const savedInvoice = await receiveAndVerifySupplierInvoice(deliveredInvoice);
+      setSupplierInvoices(previousInvoices => {
+        const receivedInvoice = {
+          ...savedInvoice,
+          status: 'delivered' as const,
+          goodsReceivingNote: deliveredInvoice.goodsReceivingNote || savedInvoice.goodsReceivingNote,
+          deliveryNote: deliveredInvoice.deliveryNote || savedInvoice.deliveryNote,
+          receivingLocation: deliveredInvoice.receivingLocation,
+          receivingNotes: deliveredInvoice.receivingNotes
+        };
+        const nextInvoices = previousInvoices.map(existingInvoice => (
+          existingInvoice.id === deliveredInvoice.id || existingInvoice.backendId === savedInvoice.backendId
+            ? receivedInvoice
+            : existingInvoice
+        ));
+        return nextInvoices.some(existingInvoice => existingInvoice.backendId === savedInvoice.backendId)
+          ? nextInvoices
+          : [receivedInvoice, ...nextInvoices];
+      });
+      await refreshBackendState(dayBalance);
+      setPendingInventoryGrn(null);
+      pushLocalNotification(
+        'Stock received',
+        deliveredItems.map(item => `${item.productName} +${item.deliveredQuantity} pcs posted to inventory`).join(', '),
+        `stock-received:${savedInvoice.id}`
+      );
+      toast.success('Stock received and verified', {
+        description: savedInvoice.goodsReceivingNote || 'Purchase order stock was updated successfully.'
+      });
+      refreshNotificationBell();
+      return;
+    }
+
+    setSupplierInvoices(previousInvoices => {
+      const invoiceExists = previousInvoices.some(existingInvoice => existingInvoice.id === deliveredInvoice.id);
+      return invoiceExists
+        ? previousInvoices.map(existingInvoice => existingInvoice.id === deliveredInvoice.id ? deliveredInvoice : existingInvoice)
+        : [deliveredInvoice, ...previousInvoices];
+    });
+    setReorderRequest(null);
+
+    if (deliveredItems.length > 0) {
+      setProducts(previousProducts => previousProducts.map(product => {
+        const deliveredItem = deliveredItems.find(item => item.productId === product.id);
+        return deliveredItem
+          ? { ...product, stock: product.stock + deliveredItem.deliveredQuantity }
+          : product;
+      }));
+      setStockMovements(previousMovements => [
+        ...deliveredItems.map(item => ({
+          id: `MOV-${deliveredInvoice.id}-${item.productId}-${Date.now()}`,
+          item: item.productName,
+          type: 'in' as const,
+          quantity: item.deliveredQuantity,
+          date: deliveredInvoice.date,
+          reason: `GRN ${deliveredInvoice.goodsReceivingNote || deliveredInvoice.id}`,
+          sourceInvoiceId: deliveredInvoice.id
+        })),
+        ...previousMovements
+      ]);
+      pushLocalNotification(
+        'Stock received',
+        deliveredItems.map(item => `${item.productName} +${item.deliveredQuantity} pcs added to inventory`).join(', '),
+        `stock-received:${deliveredInvoice.id}`
+      );
+    }
+
+    setPendingInventoryGrn(null);
+    toast.success('Stock received', {
+      description: deliveredItems
+        .map(item => `${item.productName} +${item.deliveredQuantity}`)
+        .join(', ')
+    });
   };
 
   const handleSupplierCreated = async (supplier: Omit<BackendSupplier, 'id'>) => {
@@ -690,11 +944,13 @@ export default function App() {
     }
 
     const signedQuantity = type === 'in' ? quantity : -quantity;
-    const nextStock = product.stock + signedQuantity;
+    const nextStock = Math.max(0, product.stock + signedQuantity);
+    pendingStockUpdates.current.set(productId, nextStock);
+    persistPendingStockUpdates();
 
     setProducts(previousProducts => previousProducts.map(item =>
       item.id === productId
-        ? { ...item, stock: Math.max(0, item.stock + signedQuantity) }
+        ? { ...item, stock: nextStock }
         : item
     ));
 
@@ -712,7 +968,14 @@ export default function App() {
 
     if (isBackendConnected) {
       updateProductStock(productId, nextStock)
-        .then(refreshNotificationBell)
+        .then((updatedProduct) => {
+          setProducts(previousProducts => previousProducts.map(item =>
+            item.id === productId ? { ...updatedProduct, stock: nextStock } : item
+          ));
+          pendingStockUpdates.current.delete(productId);
+          persistPendingStockUpdates();
+          refreshNotificationBell();
+        })
         .catch(error => console.warn('Unable to update adjusted stock in backend.', error));
     }
   };
@@ -750,7 +1013,7 @@ export default function App() {
 
   const handleUserDeactivated = async (userId: number) => {
     await deactivateUser(userId);
-    setUsers(previousUsers => previousUsers.map(user => user.id === userId ? { ...user, is_active: false } : user));
+    setUsers(previousUsers => previousUsers.filter(user => user.id !== userId));
     refreshNotificationBell();
   };
 
@@ -764,6 +1027,18 @@ export default function App() {
     const rejectedUser = await rejectUser(userId);
     setUsers(previousUsers => previousUsers.map(user => user.id === userId ? rejectedUser : user));
     refreshNotificationBell();
+  };
+
+  const handleUserClockIn = async (userId: number) => {
+    await clockInUser(userId);
+    const backendState = await loadBackendState(dayBalance);
+    setUsers(backendState.users);
+  };
+
+  const handleUserClockOut = async (userId: number) => {
+    await clockOutUser(userId);
+    const backendState = await loadBackendState(dayBalance);
+    setUsers(backendState.users);
   };
 
   const handleDownloadProductImportTemplate = async () => {
@@ -818,7 +1093,8 @@ export default function App() {
     const supplierName = product.supplierName || invoiceSupplier?.supplierName || fallbackSupplier?.name;
     const reorderLevel = product.reorderLevel || 10;
     const suggestedQuantity = Math.max(1, Math.ceil((reorderLevel * 2) - product.stock));
-    const suggestedAmount = Number(((product.prices.wholesale || product.prices.retail || 0) * suggestedQuantity).toFixed(2));
+    const unitCost = product.costPrice || product.prices.wholesale || product.prices.retail * 0.7 || 0;
+    const suggestedAmount = Number((unitCost * suggestedQuantity).toFixed(2));
 
     setReorderRequest({
       signal: Date.now(),
@@ -892,94 +1168,57 @@ export default function App() {
       return;
     }
 
-    const groupedBySupplier = validItems.reduce((groups, item) => {
-      const key = String(item.supplierId);
-      const group = groups.get(key) || {
-        supplierId: item.supplierId,
-        supplierName: item.supplierName,
-        items: [] as typeof validItems
-      };
-      group.items.push(item);
-      groups.set(key, group);
-      return groups;
-    }, new Map<string, { supplierId: number; supplierName: string; items: typeof validItems }>());
-
-    const newInvoices = Array.from(groupedBySupplier.values()).map((group, index) => {
-      const orderItems = group.items.map(item => {
-        const unitCost = item.product.prices.wholesale || item.product.prices.retail || 0;
-        return {
-          productId: item.product.id,
-          productName: item.product.name,
-          requestedQuantity: item.quantity,
-          deliveredQuantity: 0,
-          pendingQuantity: item.quantity,
-          unitCost
-        };
-      });
-      const quantityRequested = orderItems.reduce((sum, item) => sum + item.requestedQuantity, 0);
-      const amount = orderItems.reduce((sum, item) => sum + (item.requestedQuantity * item.unitCost), 0);
-
-      return {
-        id: nextPurchaseOrderNumber(index),
-        supplierId: group.supplierId,
-        supplierName: group.supplierName,
-        contact: '',
-        date: getTodayKey(),
-        amount: Number(amount.toFixed(2)),
-        status: 'requested' as const,
-        items: orderItems.length,
-        orderItems,
-        paymentMethod: 'Credit',
-        quantityRequested,
-        quantityDelivered: 0,
-        quantityPending: quantityRequested,
-        deliveryNote: 'Created from low-stock reorder suggestions'
-      };
+    const firstItem = validItems[0];
+    const suggestedAmount = validItems.reduce((sum, item) => {
+      const unitCost = item.product.costPrice || item.product.prices.wholesale || item.product.prices.retail * 0.7 || 0;
+      return sum + (unitCost * item.quantity);
+    }, 0);
+    setReorderRequest({
+      signal: Date.now(),
+      productId: firstItem.product.id,
+      supplierId: firstItem.supplierId,
+      supplierName: firstItem.supplierName,
+      suggestedQuantity: firstItem.quantity,
+      suggestedAmount: Number(suggestedAmount.toFixed(2)),
+      items: validItems.map(item => ({ productId: item.product.id, quantity: item.quantity }))
     });
-
-    setSupplierInvoices(previousInvoices => [
-      ...newInvoices,
-      ...previousInvoices
-    ]);
-
-    if (isBackendConnected) {
-      Promise.all(newInvoices.map(invoice => saveSupplierInvoice(invoice)))
-        .then(refreshNotificationBell)
-        .catch(error => console.warn('Unable to save low-stock purchase orders to backend.', error));
-    }
-
     setActiveItem('procurement');
-    toast.success('Purchase order requested', {
-      description: `${newInvoices.length} requested purchase order${newInvoices.length === 1 ? '' : 's'} created.`
+    toast.success('Purchase order draft ready', {
+      description: `${validItems.length} low-stock item${validItems.length === 1 ? '' : 's'} loaded for supplier review.`
     });
     pushLocalNotification(
-      'Low-stock purchase order requested',
-      `${validItems.length} item${validItems.length === 1 ? '' : 's'} queued across ${newInvoices.length} supplier order${newInvoices.length === 1 ? '' : 's'}.`,
-      `low-stock-po:${newInvoices.map(invoice => invoice.id).join(',')}`
+      'Low-stock purchase order draft ready',
+      `${validItems.length} item${validItems.length === 1 ? '' : 's'} loaded into Procurement. Review prices before sending.`,
+      `low-stock-po-draft:${validItems.map(item => item.product.id).join(',')}`
     );
   };
 
   const handleOutOfStockReorder = (productIds: string[]) => {
-    const outOfStockProducts = products.filter(product =>
-      productIds.includes(product.id) && product.stock === 0
+    const reorderProducts = products.filter(product =>
+      productIds.includes(product.id) && product.stock <= (product.reorderLevel || 10)
     );
 
-    if (outOfStockProducts.length === 0) {
-      toast.info('No out-of-stock items selected', {
-        description: 'Bulk reorder only creates requests for products with stock at 0.'
+    if (reorderProducts.length === 0) {
+      toast.info('No low-stock items selected', {
+        description: 'Reorder requests are created for products at or below their reorder level.'
       });
+      return;
+    }
+
+    if (reorderProducts.length === 1) {
+      handleInventoryReorder(reorderProducts[0].id);
       return;
     }
 
     const fallbackSupplier = suppliers.find(supplier => supplier.is_active !== false);
     const batchId = Date.now();
-    const newInvoices = outOfStockProducts.map((product) => {
+    const newInvoices = reorderProducts.map((product) => {
       const invoiceSupplier = supplierInvoices.find(invoice => invoice.productId === product.id);
       const supplierId = product.supplierId || invoiceSupplier?.supplierId || fallbackSupplier?.id || 0;
       const supplierName = product.supplierName || invoiceSupplier?.supplierName || fallbackSupplier?.name || 'Choose supplier';
       const reorderLevel = product.reorderLevel || 10;
-      const suggestedQuantity = Math.max(1, reorderLevel * 2);
-      const unitCost = product.prices.wholesale || product.prices.retail || 0;
+      const suggestedQuantity = Math.max(1, Math.ceil((reorderLevel * 2) - product.stock));
+        const unitCost = product.costPrice || product.prices.wholesale || product.prices.retail * 0.7 || 0;
 
       return {
         supplierId,
@@ -1025,9 +1264,9 @@ export default function App() {
 
     setActiveItem('procurement');
     pushLocalNotification(
-      'Out-of-stock reorder requests created',
-      `${outOfStockProducts.length} item${outOfStockProducts.length === 1 ? '' : 's'} queued. Linked suppliers have been selected where available; change supplier before sending if needed.`,
-      `out-of-stock-reorder:${outOfStockProducts.map(product => product.id).sort().join(',')}`
+      'Low-stock reorder requests created',
+      `${reorderProducts.length} item${reorderProducts.length === 1 ? '' : 's'} queued. Linked suppliers have been selected where available; change supplier before sending if needed.`,
+      `low-stock-reorder:${reorderProducts.map(product => product.id).sort().join(',')}`
     );
   };
 
@@ -1093,6 +1332,7 @@ export default function App() {
             completedSales={completedSales}
             dayBalance={dayBalance}
             cashSalesToday={cashSalesToday}
+            cashExpensesToday={cashExpensesToday}
             userRole={userRole!}
             onQuickAction={handleQuickAction}
           />
@@ -1104,6 +1344,7 @@ export default function App() {
             customers={customers}
             dayBalance={dayBalance}
             cashSalesToday={cashSalesToday}
+            cashExpensesToday={cashExpensesToday}
             cashierName={userName || 'Cashier'}
             onOpenDay={handleOpenDay}
             onCloseDay={handleCloseDay}
@@ -1145,9 +1386,9 @@ export default function App() {
             suppliers={suppliers}
             supplierInvoices={supplierInvoices}
             reorderRequest={reorderRequest}
-            onReorderProduct={handleInventoryReorder}
             onSupplierCreated={handleSupplierCreated}
-            onSupplierOrderCreated={handleSupplierOrderCreated}
+            onSupplierOrderSent={handleSupplierOrderSent}
+            onOpenInventoryGrn={handleOpenInventoryGrn}
           />
         );
       case 'inventory':
@@ -1165,6 +1406,9 @@ export default function App() {
             onDownloadAvailableItems={handleDownloadAvailableProducts}
             onReorderOutOfStock={handleOutOfStockReorder}
             onCreateReorderPurchaseOrders={handleLowStockPurchaseOrdersCreated}
+            pendingGrnRequest={pendingInventoryGrn}
+            onCloseGrn={() => setPendingInventoryGrn(null)}
+            onReceivedAndVerified={handleInventoryReceivedAndVerified}
           />
         );
       case 'expenses':
@@ -1188,6 +1432,8 @@ export default function App() {
             onDeactivateUser={handleUserDeactivated}
             onApproveUser={handleUserApproved}
             onRejectUser={handleUserRejected}
+            onClockInUser={handleUserClockIn}
+            onClockOutUser={handleUserClockOut}
           />
         );
       case 'settings':
@@ -1199,6 +1445,7 @@ export default function App() {
             completedSales={completedSales}
             dayBalance={dayBalance}
             cashSalesToday={cashSalesToday}
+            cashExpensesToday={cashExpensesToday}
             userRole={userRole!}
             onQuickAction={handleQuickAction}
           />
@@ -1215,6 +1462,63 @@ export default function App() {
     );
   }
 
+  if (passwordResetRequired) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
+        <Toaster richColors position="top-right" />
+        <form onSubmit={handleRequiredPasswordChange} className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-6 shadow-lg">
+          <div className="mb-6">
+            <h1 className="text-2xl font-bold text-gray-900">Set a new password</h1>
+            <p className="mt-2 text-sm text-gray-600">
+              Your administrator created this account with a temporary password. Choose a new password to continue.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">New password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+                className="h-11 w-full rounded-md border border-gray-300 px-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmNewPassword}
+                onChange={(event) => setConfirmNewPassword(event.target.value)}
+                className="h-11 w-full rounded-md border border-gray-300 px-3 text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                required
+              />
+            </div>
+            {passwordResetError && (
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {passwordResetError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={isResettingPassword}
+              className="h-11 w-full rounded-md bg-blue-600 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isResettingPassword ? 'Updating...' : 'Update password'}
+            </button>
+            <button
+              type="button"
+              onClick={performLogout}
+              className="h-10 w-full rounded-md border border-gray-300 font-medium text-gray-700 hover:bg-gray-100"
+            >
+              Sign out
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-soft-pop min-h-screen bg-gray-50 flex flex-col">
       <Toaster richColors position="top-right" />
@@ -1222,18 +1526,18 @@ export default function App() {
       <TopHeader />
       
       {/* Main Content with Sidebar */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 items-start">
         {/* Sidebar */}
         <Sidebar 
           activeItem={activeItem} 
           onItemClick={handleItemClick}
-          onLogout={handleLogout}
+          onLogout={performLogout}
           userRole={userRole!}
           userName={userName}
         />
         
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto scroll-smooth">
+        <div className="flex-1 scroll-smooth">
           <div className="max-w-7xl mx-auto p-8">
             <div key={activeItem} className="animate-page-enter">
               {renderContent()}

@@ -181,6 +181,27 @@ class UserAPITest(TestCase):
         
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data['username'], 'newcashier')
+        self.assertTrue(response.data['must_change_password'])
+
+        created_user = User.objects.get(username='newcashier')
+        self.assertEqual(created_user.approval_status, 'approved')
+        self.assertTrue(created_user.must_change_password)
+
+    def test_public_user_creation_is_blocked(self):
+        """Test unauthenticated users cannot create their own accounts"""
+        self.client.credentials()
+
+        response = self.client.post('/api/users/', {
+            'username': 'publicuser',
+            'password': 'newpass123',
+            'confirm_password': 'newpass123',
+            'email': 'public@test.com',
+            'phone': '0744444444',
+            'role': 'cashier',
+        })
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertFalse(User.objects.filter(username='publicuser').exists())
     
     def test_update_role(self):
         """Test POST /api/users/{id}/update-role/"""

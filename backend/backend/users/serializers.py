@@ -2,7 +2,38 @@
 from rest_framework import serializers
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from .models import User
+from .models import ShiftSession, User
+
+
+class ShiftSessionSerializer(serializers.ModelSerializer):
+    staff_name = serializers.SerializerMethodField()
+    username = serializers.CharField(source='user.username', read_only=True)
+    worked_seconds = serializers.IntegerField(read_only=True)
+    remaining_seconds = serializers.IntegerField(read_only=True)
+    progress_percent = serializers.IntegerField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    is_overdue = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = ShiftSession
+        fields = [
+            'id',
+            'user',
+            'staff_name',
+            'username',
+            'started_at',
+            'expected_end_at',
+            'ended_at',
+            'worked_seconds',
+            'remaining_seconds',
+            'progress_percent',
+            'is_active',
+            'is_overdue',
+        ]
+        read_only_fields = fields
+
+    def get_staff_name(self, obj):
+        return obj.user.get_full_name() or obj.user.username
 
 class UserSerializer(serializers.ModelSerializer):
 
@@ -21,6 +52,9 @@ class UserSerializer(serializers.ModelSerializer):
     # Computed fields
     full_name = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
+    shift_tracking_required = serializers.BooleanField(read_only=True)
+    active_shift = serializers.SerializerMethodField()
+    latest_shift = serializers.SerializerMethodField()
     
     class Meta:
         model = User
@@ -52,6 +86,7 @@ class UserSerializer(serializers.ModelSerializer):
             'rejected_by',
             'approval_notes',
             'is_online',
+            'must_change_password',
             'date_joined',
             'last_login',
             'last_activity',
@@ -59,11 +94,16 @@ class UserSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'permissions',
+            'shift_tracking_required',
+            'active_shift',
+            'latest_shift',
         ]
         read_only_fields = ['id', 'uuid', 'employee_id', 'date_joined', 'created_at', 
                            'updated_at', 'is_online', 'last_login', 'last_activity',
                            'approval_status', 'approval_requested_at', 'approval_deadline_at',
-                           'approved_at', 'approved_by', 'rejected_at', 'rejected_by']
+                           'approved_at', 'approved_by', 'rejected_at', 'rejected_by',
+                           'must_change_password', 'shift_tracking_required', 'active_shift',
+                           'latest_shift']
         extra_kwargs = {
             'username': {'required': True},
             'email': {'required': True},
@@ -87,6 +127,14 @@ class UserSerializer(serializers.ModelSerializer):
     def get_permissions(self, obj):
         #Return user's permissions
         return obj.get_permissions_list()
+
+    def get_active_shift(self, obj):
+        shift = obj.shift_sessions.filter(ended_at__isnull=True).order_by('-started_at').first()
+        return ShiftSessionSerializer(shift).data if shift else None
+
+    def get_latest_shift(self, obj):
+        shift = obj.shift_sessions.order_by('-started_at').first()
+        return ShiftSessionSerializer(shift).data if shift else None
     
     def validate_username(self, value):
         #Validate username is unique

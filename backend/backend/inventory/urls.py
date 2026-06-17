@@ -3,7 +3,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     BatchViewSet, StockMovementViewSet, PurchaseOrderViewSet,
-    StockCountViewSet, StoreTransferViewSet, StoreStockViewSet,
+    GoodsReceivedNoteViewSet, StockCountViewSet, StoreTransferViewSet, StoreStockViewSet,
     InventoryAlertViewSet, BulkInventoryViewSet
 )
 
@@ -11,6 +11,7 @@ router = DefaultRouter(trailing_slash=True)
 router.register(r'batches', BatchViewSet, basename='batch')
 router.register(r'stock-movements', StockMovementViewSet, basename='stock-movement')
 router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-order')
+router.register(r'goods-received-notes', GoodsReceivedNoteViewSet, basename='goods-received-note')
 router.register(r'stock-counts', StockCountViewSet, basename='stock-count')
 router.register(r'store-transfers', StoreTransferViewSet, basename='store-transfer')
 router.register(r'store-stock', StoreStockViewSet, basename='store-stock')

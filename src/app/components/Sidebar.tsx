@@ -43,6 +43,7 @@ interface SidebarProps {
 
 export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName }: SidebarProps) {
   const { t } = useAppLanguage();
+  const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
   const filteredMenuItems = allMenuItems.filter(item => canAccessModule(item.id, userRole));
 
   const getRoleBadgeColor = (role: UserRole) => {
@@ -68,7 +69,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
   };
 
   return (
-    <div className="w-60 h-screen bg-white border-r border-gray-200 flex flex-col shadow-sm">
+    <div className="sticky top-0 h-screen w-60 shrink-0 overflow-hidden bg-white border-r border-gray-200 flex flex-col shadow-sm">
       {/* Logo/Brand */}
       <div className="p-5 border-b border-gray-100">
         <h2 className="text-gray-900 font-semibold text-lg tracking-tight">SALES ENTRY & RECEIPT</h2>
@@ -85,7 +86,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
       </div>
 
       {/* Navigation Menu */}
-      <div className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+      <div className="flex-1 p-3 space-y-0.5 overflow-hidden">
         {filteredMenuItems.map((item) => {
           const IconComponent = item.icon;
           const isActive = activeItem === item.id;
@@ -93,7 +94,10 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
           return (
             <button
               key={item.id}
-              onClick={() => onItemClick(item.id)}
+              onClick={() => {
+                setIsLogoutConfirmOpen(false);
+                onItemClick(item.id);
+              }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors text-sm ${
                 isActive
                   ? 'bg-blue-600 text-white font-medium'
@@ -108,11 +112,37 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
       </div>
 
       {/* Logout Button */}
-      <div className="p-3 border-t border-gray-100">
+      <div className="relative p-3 border-t border-gray-100">
+        {isLogoutConfirmOpen && (
+          <div className="absolute bottom-full left-3 right-3 mb-2 rounded-md border border-gray-200 bg-white p-3 shadow-xl">
+            <p className="text-sm font-semibold text-gray-900">{t('Log out?')}</p>
+            <p className="mt-1 text-xs text-gray-500">{t('End this session and return to sign in.')}</p>
+            <div className="mt-3 flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 flex-1 text-xs"
+                onClick={() => setIsLogoutConfirmOpen(false)}
+              >
+                {t('Stay')}
+              </Button>
+              <Button
+                type="button"
+                className="h-8 flex-1 bg-blue-600 text-xs text-white hover:bg-blue-700"
+                onClick={() => {
+                  setIsLogoutConfirmOpen(false);
+                  onLogout();
+                }}
+              >
+                {t('Logout')}
+              </Button>
+            </div>
+          </div>
+        )}
         <Button
           variant="ghost"
           className="w-full justify-start text-gray-500 hover:text-gray-900 hover:bg-gray-100 text-sm"
-          onClick={onLogout}
+          onClick={() => setIsLogoutConfirmOpen(previous => !previous)}
         >
           <LogOut className="w-4 h-4 mr-3" />
           {t('Logout')}

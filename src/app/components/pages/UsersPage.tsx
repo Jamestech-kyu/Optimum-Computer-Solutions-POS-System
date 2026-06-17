@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
-import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users, CheckCircle2, XCircle } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, UserCheck, Shield, Users, CheckCircle2, XCircle, Clock, Play, Square } from 'lucide-react';
 import type { BackendRole, BackendUser, RegistrationRole } from '../../services/api';
 import { getStatusBadge } from '../utils/helpers';
 
@@ -26,6 +26,8 @@ interface UsersPageProps {
   onDeactivateUser: (userId: number) => Promise<void>;
   onApproveUser: (userId: number) => Promise<void>;
   onRejectUser: (userId: number) => Promise<void>;
+  onClockInUser: (userId: number) => Promise<void>;
+  onClockOutUser: (userId: number) => Promise<void>;
 }
 
 const roleLabel = (role: string) => {
@@ -43,13 +45,23 @@ const roleLabel = (role: string) => {
   return labels[role] || role;
 };
 
-export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser, onApproveUser, onRejectUser }: UsersPageProps) {
+const formatShiftTime = (seconds?: number) => {
+  const totalMinutes = Math.max(0, Math.floor((seconds || 0) / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+};
+
+const formatDateTime = (value?: string | null) => value ? new Date(value).toLocaleString() : 'Not started';
+
+export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser, onApproveUser, onRejectUser, onClockInUser, onClockOutUser }: UsersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<BackendUser | null>(null);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [shiftActionUserId, setShiftActionUserId] = useState<number | null>(null);
   const [newUser, setNewUser] = useState({
     username: '',
     email: '',
@@ -61,14 +73,18 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
     is_active: true
   });
 
-  const filteredUsers = users.filter(user => {
+  const visibleUsers = users.filter(user => user.is_active);
+
+  const filteredUsers = visibleUsers.filter(user => {
     const matchesSearch = user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
 
-  const pendingUsers = users.filter(user => user.approval_status === 'pending');
+  const pendingUsers = visibleUsers.filter(user => user.approval_status === 'pending');
+  const trackedUsers = visibleUsers.filter(user => user.shift_tracking_required);
+  const activeShiftCount = trackedUsers.filter(user => user.active_shift).length;
 
   const getRoleBadge = (role: string) => {
     const colors = {
@@ -160,6 +176,30 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
       await onRejectUser(user.id);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'User could not be rejected.');
+    }
+  };
+
+  const handleClockInUser = async (user: BackendUser) => {
+    setFormError('');
+    setShiftActionUserId(user.id);
+    try {
+      await onClockInUser(user.id);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Shift could not be started.');
+    } finally {
+      setShiftActionUserId(null);
+    }
+  };
+
+  const handleClockOutUser = async (user: BackendUser) => {
+    setFormError('');
+    setShiftActionUserId(user.id);
+    try {
+      await onClockOutUser(user.id);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : 'Shift could not be completed.');
+    } finally {
+      setShiftActionUserId(null);
     }
   };
 
@@ -278,7 +318,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Total Users</p>
-                <p className="text-2xl font-semibold text-gray-900">{users.length}</p>
+                <p className="text-2xl font-semibold text-gray-900">{visibleUsers.length}</p>
               </div>
               <div className="p-2 bg-blue-500/20 rounded-lg">
                 <Users className="w-6 h-6 text-blue-600" />
@@ -292,7 +332,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
               <div>
                 <p className="text-gray-500 text-sm">Active Users</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.is_active).length}
+                  {visibleUsers.length}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -307,7 +347,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
               <div>
                 <p className="text-gray-500 text-sm">Administrators</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {users.filter(u => u.role === 'admin').length}
+                  {visibleUsers.filter(u => u.role === 'admin').length}
                 </p>
               </div>
               <div className="p-2 bg-red-500/20 rounded-lg">
@@ -320,18 +360,21 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Pending Approval</p>
+                <p className="text-gray-500 text-sm">On Shift</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {pendingUsers.length}
+                  {activeShiftCount}/{trackedUsers.length}
                 </p>
               </div>
               <div className="p-2 bg-yellow-500/20 rounded-lg">
-                <Search className="w-6 h-6 text-yellow-600" />
+                <Clock className="w-6 h-6 text-yellow-600" />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+      {pendingUsers.length > 0 && (
+        <p className="mb-4 text-sm text-gray-500">{pendingUsers.length} user{pendingUsers.length === 1 ? '' : 's'} pending approval.</p>
+      )}
 
       {/* Filters */}
       <Card className="bg-white border-gray-200 mb-6">
@@ -366,7 +409,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
         <CardHeader>
           <CardTitle className="text-gray-900">Staff Members ({filteredUsers.length})</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow className="border-gray-200">
@@ -374,6 +417,7 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
                 <TableHead className="text-gray-600">Email</TableHead>
                 <TableHead className="text-gray-600">Role</TableHead>
                 <TableHead className="text-gray-600">Last Login</TableHead>
+                <TableHead className="text-gray-600">8h Shift</TableHead>
                 <TableHead className="text-gray-600">Approval</TableHead>
                 <TableHead className="text-gray-600">Status</TableHead>
                 <TableHead className="text-gray-600">Actions</TableHead>
@@ -386,6 +430,31 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
                   <TableCell className="text-gray-600">{user.email}</TableCell>
                   <TableCell>{getRoleBadge(roleLabel(user.role))}</TableCell>
                   <TableCell className="text-gray-600">{user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</TableCell>
+                  <TableCell className="min-w-52">
+                    {user.shift_tracking_required ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className={`text-xs font-medium ${user.active_shift?.is_overdue ? 'text-red-600' : user.active_shift ? 'text-green-700' : 'text-gray-500'}`}>
+                            {user.active_shift ? (user.active_shift.is_overdue ? 'Over 8h' : 'Active') : 'Off shift'}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {user.active_shift ? formatShiftTime(user.active_shift.worked_seconds) : formatDateTime(user.latest_shift?.ended_at)}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded bg-gray-100">
+                          <div
+                            className={`h-2 rounded ${user.active_shift?.is_overdue ? 'bg-red-500' : 'bg-blue-600'}`}
+                            style={{ width: `${user.active_shift?.progress_percent || user.latest_shift?.progress_percent || 0}%` }}
+                          />
+                        </div>
+                        {user.active_shift && (
+                          <p className="text-xs text-gray-500">Ends {formatDateTime(user.active_shift.expected_end_at)}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">Not tracked</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <div className="space-y-1">
                       {getApprovalBadge(user)}
@@ -410,6 +479,17 @@ export function UsersPage({ users, onCreateUser, onUpdateUser, onDeactivateUser,
                       <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300" onClick={() => openEditDialog(user)}>
                         <Edit className="w-4 h-4" />
                       </Button>
+                      {user.shift_tracking_required && (
+                        user.active_shift ? (
+                          <Button size="sm" variant="ghost" className="text-gray-700 hover:text-gray-500" onClick={() => handleClockOutUser(user)} disabled={shiftActionUserId === user.id}>
+                            <Square className="w-4 h-4" />
+                          </Button>
+                        ) : (
+                          <Button size="sm" variant="ghost" className="text-green-700 hover:text-green-500" onClick={() => handleClockInUser(user)} disabled={shiftActionUserId === user.id}>
+                            <Play className="w-4 h-4" />
+                          </Button>
+                        )
+                      )}
                       <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-300" onClick={() => handleDeactivateUser(user)}>
                         <Trash2 className="w-4 h-4" />
                       </Button>

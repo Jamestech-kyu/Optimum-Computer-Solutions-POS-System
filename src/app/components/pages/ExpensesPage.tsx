@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Textarea } from '../ui/textarea';
 import { Plus, Search, Edit, Trash2, Receipt, TrendingDown } from 'lucide-react';
 import type { BusinessExpense } from '../../types/supplierOrder';
+import { formatCurrency } from '../utils/helpers';
 
 const categories = ['Rent', 'Utilities', 'Staff Salary', 'Equipment', 'Marketing', 'Supplies', 'Other'];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -38,8 +39,17 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
   });
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  const draftAmount = Number(expenseForm.amount) || 0;
+  const calculatedTotalAfterSave = totalExpenses + draftAmount;
   const thisMonthExpenses = expenses
-    .filter(exp => new Date(exp.date).getMonth() === new Date().getMonth())
+    .filter(exp => {
+      const expenseDate = new Date(exp.date);
+      const now = new Date();
+      return expenseDate.getMonth() === now.getMonth() && expenseDate.getFullYear() === now.getFullYear();
+    })
+    .reduce((sum, exp) => sum + exp.amount, 0);
+  const todayExpenses = expenses
+    .filter(exp => exp.date === today())
     .reduce((sum, exp) => sum + exp.amount, 0);
 
   const getPaymentMethodBadge = (method: string) => {
@@ -133,6 +143,17 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
                 onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
                 className="bg-gray-100 border-gray-200 text-gray-900"
               />
+              {draftAmount > 0 && (
+                <div className="rounded-md border border-red-100 bg-red-50 p-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-600">Total after saving</span>
+                    <span className="font-semibold text-gray-900">{formatCurrency(calculatedTotalAfterSave)}</span>
+                  </div>
+                  {expenseForm.paymentMethod === 'Cash' && (
+                    <p className="mt-1 text-xs text-red-700">Cash drawer expected balance will reduce by {formatCurrency(draftAmount)}.</p>
+                  )}
+                </div>
+              )}
               <div className="flex gap-2">
                 <Button className="flex-1" onClick={handleCreateExpense}>Add Expense</Button>
                 <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
@@ -149,7 +170,7 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-500 text-sm">Total Expenses</p>
-                <p className="text-2xl font-semibold text-gray-900">KSh {totalExpenses.toFixed(0)}</p>
+                <p className="text-2xl font-semibold text-gray-900">{formatCurrency(totalExpenses)}</p>
               </div>
               <div className="p-2 bg-red-500/20 rounded-lg">
                 <TrendingDown className="w-6 h-6 text-red-600" />
@@ -162,7 +183,7 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-gray-500 text-sm">This Month</p>
-                <p className="text-2xl font-semibold text-gray-900">KSh {thisMonthExpenses.toFixed(0)}</p>
+                <p className="text-2xl font-semibold text-gray-900">{formatCurrency(thisMonthExpenses)}</p>
               </div>
               <div className="p-2 bg-orange-500/20 rounded-lg">
                 <Receipt className="w-6 h-6 text-orange-600" />
@@ -174,8 +195,8 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">Total Records</p>
-                <p className="text-2xl font-semibold text-gray-900">{expenses.length}</p>
+                <p className="text-gray-500 text-sm">Today</p>
+                <p className="text-2xl font-semibold text-gray-900">{formatCurrency(todayExpenses)}</p>
               </div>
               <div className="p-2 bg-blue-500/20 rounded-lg">
                 <Plus className="w-6 h-6 text-blue-600" />
@@ -187,9 +208,9 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-500 text-sm">With Receipt</p>
+                <p className="text-gray-500 text-sm">Total Records</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  {expenses.filter(exp => exp.receipt).length}
+                  {expenses.length}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -255,7 +276,7 @@ export function ExpensesPage({ expenses, onExpenseCreated }: ExpensesPageProps) 
                     </Badge>
                   </TableCell>
                   <TableCell className="text-gray-900">{expense.description}</TableCell>
-                  <TableCell className="text-red-600">KSh {expense.amount.toFixed(2)}</TableCell>
+                  <TableCell className="text-red-600">{formatCurrency(expense.amount)}</TableCell>
                   <TableCell className="text-gray-600">{expense.date}</TableCell>
                   <TableCell>{getPaymentMethodBadge(expense.paymentMethod)}</TableCell>
                   <TableCell>

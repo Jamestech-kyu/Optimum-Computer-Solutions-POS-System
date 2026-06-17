@@ -6,6 +6,8 @@ from django.utils import timezone
 from datetime import timedelta
 import uuid
 
+SHIFT_TRACKING_EXCLUDED_ROLES = ['super_admin', 'admin', 'manager']
+
 class User(AbstractUser):
     """
     Custom User model for ERP/POS system.
@@ -164,6 +166,11 @@ class User(AbstractUser):
         default=False,
         help_text="Currently logged in"
     )
+
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text="Forces the user to set a new password after login"
+    )
     
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)
     
@@ -301,3 +308,70 @@ class User(AbstractUser):
             'can_manage_stock': self.role in ['super_admin', 'admin', 'manager', 'inventory_clerk'],
         }
         return permissions
+
+    @property
+    def shift_tracking_required(self):
+        return self.role not in SHIFT_TRACKING_EXCLUDED_ROLES
+
+
+class ShiftSession(models.Model):
+    """
+    Tracks one staff work session against the standard 8-hour shift target.
+    Managers and administrators are intentionally excluded by service logic.
+    """
+
+    SHIFT_HOURS = 8
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='shift_sessions')
+    started_at = models.DateTimeField(default=timezone.now)
+    expected_end_at = models.DateTimeField(blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'user_shift_sessions'
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['user', 'started_at']),
+            models.Index(fields=['ended_at']),
+            models.Index(fields=['expected_end_at']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.expected_end_at:
+            self.expected_end_at = self.started_at + timedelta(hours=self.SHIFT_HOURS)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_active(self):
+        return self.ended_at is None
+
+    @property
+    def worked_seconds(self):
+        end_time = self.ended_at or timezone.now()
+        return max(0, int((end_time - self.started_at).total_seconds()))
+
+    @property
+    def remaining_seconds(self):
+        if self.ended_at:
+            return 0
+        return max(0, int((self.expected_end_at - timezone.now()).total_seconds()))
+
+    @property
+    def is_overdue(self):
+        return self.is_active and timezone.now() > self.expected_end_at
+
+    @property
+    def progress_percent(self):
+        target_seconds = self.SHIFT_HOURS * 60 * 60
+        return min(100, round((self.worked_seconds / target_seconds) * 100))
+
+    def clock_out(self):
+        if not self.ended_at:
+            self.ended_at = timezone.now()
+            self.save(update_fields=['ended_at', 'updated_at'])
+
+    def __str__(self):
+        status = 'active' if self.is_active else 'completed'
+        return f"{self.user.username} shift ({status})"

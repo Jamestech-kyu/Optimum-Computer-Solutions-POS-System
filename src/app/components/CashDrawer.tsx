@@ -24,6 +24,7 @@ interface CashDrawerProps {
   cashier: string;
   dayBalance: DayBalance;
   cashSalesToday: number;
+  cashExpensesToday: number;
   onOpenDay: (openingBalance: number) => void;
   onCloseDay: (closingBalance: number) => void;
 }
@@ -34,10 +35,11 @@ export function CashDrawer({
   cashier,
   dayBalance,
   cashSalesToday,
+  cashExpensesToday,
   onOpenDay
 }: CashDrawerProps) {
   const [openingBalance, setOpeningBalance] = useState(dayBalance.openingBalance.toString());
-  const expectedClosingBalance = dayBalance.openingBalance + cashSalesToday;
+  const expectedClosingBalance = dayBalance.openingBalance + cashSalesToday - cashExpensesToday;
   const openedAt = dayBalance.openedAt ? new Date(dayBalance.openedAt) : null;
   const autoCloseAt = openedAt ? new Date(openedAt.getTime() + 24 * 60 * 60 * 1000) : null;
 
@@ -125,6 +127,10 @@ export function CashDrawer({
               <div>
                 <p className="mb-1 text-xs text-gray-600">Today's Cash Sales</p>
                 <p className="text-lg font-bold text-blue-600">{formatCurrency(cashSalesToday)}</p>
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-600">Today's Cash Expenses</p>
+                <p className="text-lg font-bold text-red-600">-{formatCurrency(cashExpensesToday)}</p>
               </div>
               <div className="col-span-2">
                 <p className="mb-1 text-xs text-gray-600">Expected Balance at Auto Close</p>

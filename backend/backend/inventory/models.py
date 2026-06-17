@@ -230,6 +230,7 @@ class PurchaseOrder(models.Model):
         ('submitted', 'Submitted'),
         ('confirmed', 'Confirmed'),
         ('shipped', 'Shipped'),
+        ('receiving', 'Receiving Pending Verification'),
         ('received', 'Partially Received'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
@@ -321,62 +322,36 @@ class PurchaseOrder(models.Model):
         self.save(update_fields=['status', 'approved_by', 'approved_at', 'updated_at'])
 
     def receive_items(self, user, received_items):
+        grn = GoodsReceivedNote.objects.create(
+            purchase_order=self,
+            supplier=self.supplier,
+            created_by=user,
+            notes='Goods received pending verification',
+        )
+
         for received_item in received_items:
             item = self.items.select_related('product').get(id=received_item['item_id'])
             quantity = Decimal(str(received_item['quantity']))
-            remaining = item.remaining_to_receive
+            remaining = item.remaining_to_receive - item.pending_verification_quantity
             if quantity > remaining:
                 raise ValidationError(f"Cannot receive {quantity} for {item.product.name}. Remaining: {remaining}")
 
-            product = item.product
-            stock_before = product.stock_quantity
-            product.stock_quantity = stock_before + quantity
-            product.save(update_fields=['stock_quantity', 'updated_at'])
-
-            item.quantity_received += quantity
-            item.save(update_fields=['quantity_received'])
-
-            batch = None
-            batch_number = received_item.get('batch_number') or ''
-            if batch_number:
-                batch, _ = Batch.objects.get_or_create(
-                    batch_number=batch_number,
-                    defaults={
-                        'product': product,
-                        'quantity': quantity,
-                        'remaining_quantity': quantity,
-                        'manufacturing_date': received_item.get('manufacturing_date'),
-                        'expiry_date': received_item.get('expiry_date'),
-                        'purchase_order': self,
-                        'purchase_price': item.unit_cost,
-                        'supplier': self.supplier,
-                        'location': received_item.get('location', 'Main Store'),
-                        'notes': received_item.get('notes', ''),
-                    }
-                )
-
-            StockMovement.objects.create(
-                product=product,
-                batch=batch,
-                movement_type='purchase',
+            GoodsReceivedNoteItem.objects.create(
+                goods_received_note=grn,
+                purchase_order_item=item,
+                product=item.product,
                 quantity=quantity,
-                stock_before=stock_before,
-                stock_after=product.stock_quantity,
-                unit_cost=item.unit_cost,
-                reference_id=self.po_number,
-                reference_type='purchase_order',
-                reason='Goods received from supplier',
-                notes=received_item.get('notes', ''),
-                recorded_by=user,
+                batch_number=received_item.get('batch_number', ''),
+                manufacturing_date=received_item.get('manufacturing_date'),
+                expiry_date=received_item.get('expiry_date'),
                 location=received_item.get('location', 'Main Store'),
+                notes=received_item.get('notes', ''),
             )
 
-        if all(item.remaining_to_receive <= 0 for item in self.items.all()):
-            self.status = 'completed'
-        else:
-            self.status = 'received'
+        self.status = 'receiving'
         self.delivery_date = timezone.now()
         self.save(update_fields=['status', 'delivery_date', 'updated_at'])
+        return grn
 
 
 class PurchaseOrderItem(models.Model):
@@ -409,6 +384,164 @@ class PurchaseOrderItem(models.Model):
     @property
     def remaining_to_receive(self):
         return max(self.quantity - self.quantity_received, Decimal('0'))
+
+    @property
+    def pending_verification_quantity(self):
+        total = self.grn_items.filter(
+            goods_received_note__status='pending',
+            is_verified=False,
+        ).aggregate(total=models.Sum('quantity'))['total']
+        return total or Decimal('0')
+
+
+class GoodsReceivedNote(models.Model):
+    GRN_STATUS = [
+        ('pending', 'Pending Verification'),
+        ('verified', 'Verified and Posted'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    grn_number = models.CharField(max_length=50, unique=True, editable=False, db_index=True)
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.PROTECT, related_name='goods_received_notes')
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='goods_received_notes')
+    status = models.CharField(max_length=20, choices=GRN_STATUS, default='pending', db_index=True)
+
+    created_by = models.ForeignKey('users.User', on_delete=models.PROTECT, related_name='goods_received_notes')
+    verified_by = models.ForeignKey('users.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='verified_goods_received_notes')
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.grn_number} - {self.purchase_order.po_number}"
+
+    def save(self, *args, **kwargs):
+        if not self.grn_number:
+            date_str = datetime.now().strftime('%Y%m%d')
+            last_grn = GoodsReceivedNote.objects.filter(
+                grn_number__startswith=f'GRN-{date_str}'
+            ).order_by('-grn_number').first()
+
+            if last_grn:
+                try:
+                    last_num = int(last_grn.grn_number.split('-')[-1])
+                    new_num = last_num + 1
+                except (IndexError, ValueError):
+                    new_num = 1
+            else:
+                new_num = 1
+
+            self.grn_number = f"GRN-{date_str}-{new_num:05d}"
+        super().save(*args, **kwargs)
+
+    @transaction.atomic
+    def verify_items(self, user, item_ids=None):
+        if self.status == 'cancelled':
+            raise ValidationError('Cannot verify a cancelled GRN')
+
+        items = self.items.select_related('product', 'purchase_order_item')
+        if item_ids:
+            items = items.filter(id__in=item_ids)
+
+        posted_count = 0
+        for grn_item in items.filter(is_verified=False):
+            po_item = grn_item.purchase_order_item
+            product = grn_item.product
+            remaining = po_item.remaining_to_receive
+            if grn_item.quantity > remaining:
+                raise ValidationError(f"Cannot verify {grn_item.quantity} for {product.name}. Remaining: {remaining}")
+
+            stock_before = product.stock_quantity
+            product.stock_quantity = stock_before + grn_item.quantity
+            product.save(update_fields=['stock_quantity', 'updated_at'])
+
+            po_item.quantity_received += grn_item.quantity
+            po_item.save(update_fields=['quantity_received'])
+
+            batch = None
+            if grn_item.batch_number:
+                batch, _ = Batch.objects.get_or_create(
+                    batch_number=grn_item.batch_number,
+                    defaults={
+                        'product': product,
+                        'quantity': grn_item.quantity,
+                        'remaining_quantity': grn_item.quantity,
+                        'manufacturing_date': grn_item.manufacturing_date,
+                        'expiry_date': grn_item.expiry_date,
+                        'purchase_order': self.purchase_order,
+                        'purchase_price': po_item.unit_cost,
+                        'supplier': self.supplier,
+                        'location': grn_item.location,
+                        'notes': grn_item.notes,
+                    }
+                )
+
+            StockMovement.objects.create(
+                product=product,
+                batch=batch,
+                movement_type='purchase',
+                quantity=grn_item.quantity,
+                stock_before=stock_before,
+                stock_after=product.stock_quantity,
+                unit_cost=po_item.unit_cost,
+                reference_id=self.grn_number,
+                reference_type='goods_received_note',
+                reason='Goods received and verified from supplier',
+                notes=grn_item.notes,
+                recorded_by=user,
+                location=grn_item.location,
+            )
+
+            grn_item.is_verified = True
+            grn_item.verified_by = user
+            grn_item.verified_at = timezone.now()
+            grn_item.save(update_fields=['is_verified', 'verified_by', 'verified_at'])
+            posted_count += 1
+
+        if not self.items.filter(is_verified=False).exists():
+            self.status = 'verified'
+            self.verified_by = user
+            self.verified_at = timezone.now()
+            self.save(update_fields=['status', 'verified_by', 'verified_at', 'updated_at'])
+
+        purchase_order = self.purchase_order
+        if all(item.remaining_to_receive <= 0 for item in purchase_order.items.all()):
+            purchase_order.status = 'completed'
+        elif purchase_order.items.filter(quantity_received__gt=0).exists():
+            purchase_order.status = 'received'
+        else:
+            purchase_order.status = 'receiving'
+        purchase_order.save(update_fields=['status', 'updated_at'])
+
+        return posted_count
+
+
+class GoodsReceivedNoteItem(models.Model):
+    goods_received_note = models.ForeignKey(GoodsReceivedNote, on_delete=models.CASCADE, related_name='items')
+    purchase_order_item = models.ForeignKey(PurchaseOrderItem, on_delete=models.PROTECT, related_name='grn_items')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    quantity = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+
+    batch_number = models.CharField(max_length=50, blank=True)
+    manufacturing_date = models.DateField(null=True, blank=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    location = models.CharField(max_length=100, blank=True, default='Main Store')
+    notes = models.TextField(blank=True)
+
+    is_verified = models.BooleanField(default=False)
+    verified_by = models.ForeignKey('users.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='verified_goods_received_note_items')
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['id']
+
+    def __str__(self):
+        return f"{self.goods_received_note.grn_number} - {self.product.name} - {self.quantity}"
 
 
 # ============================================================

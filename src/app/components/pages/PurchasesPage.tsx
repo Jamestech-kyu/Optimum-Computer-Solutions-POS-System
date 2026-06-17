@@ -6,14 +6,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Plus, Search, Eye, FileText } from 'lucide-react';
+import { Plus, Search, Eye, FileText, PackageCheck } from 'lucide-react';
 import type { SupplierOrderInvoice } from '../../types/supplierOrder';
 
 interface PurchasesPageProps {
   supplierInvoices: SupplierOrderInvoice[];
+  onReceiveGoods: (invoice: SupplierOrderInvoice) => void;
 }
 
-export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
+export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -26,10 +27,13 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
     items: invoice.items,
     deliveryNote: invoice.deliveryNote,
     goodsReceivingNote: invoice.goodsReceivingNote,
+    receivingLocation: invoice.receivingLocation,
+    receivingNotes: invoice.receivingNotes,
     requestedItems: invoice.orderItems?.reduce((sum, item) => sum + item.requestedQuantity, 0) || invoice.quantityRequested || 0,
     deliveredItems: invoice.orderItems?.reduce((sum, item) => sum + item.deliveredQuantity, 0) || invoice.quantityDelivered || 0,
     pendingItems: invoice.orderItems?.reduce((sum, item) => sum + item.pendingQuantity, 0) || invoice.quantityPending || 0,
-    orderItems: invoice.orderItems || []
+    orderItems: invoice.orderItems || [],
+    invoice
   }));
   const pagePurchases = livePurchases;
   const pageSuppliers = Array.from(new Map(supplierInvoices.map(invoice => [invoice.supplierId, { id: invoice.supplierId, name: invoice.supplierName }])).values());
@@ -262,11 +266,30 @@ export function PurchasesPage({ supplierInvoices }: PurchasesPageProps) {
                   <TableCell className="text-gray-600">{purchase.requestedItems}</TableCell>
                   <TableCell className="text-green-600">{purchase.deliveredItems}</TableCell>
                   <TableCell className={purchase.pendingItems > 0 ? 'text-orange-600' : 'text-gray-600'}>{purchase.pendingItems}</TableCell>
-                  <TableCell className="text-gray-600">{purchase.goodsReceivingNote || '-'}</TableCell>
+                  <TableCell className="text-gray-600">
+                    <div className="space-y-1">
+                      <p>{purchase.goodsReceivingNote || '-'}</p>
+                      {(purchase.receivingLocation || purchase.receivingNotes) && (
+                        <p className="text-xs text-gray-500">
+                          {[purchase.receivingLocation, purchase.receivingNotes].filter(Boolean).join(' | ')}
+                        </p>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-gray-600">{purchase.deliveryNote || '-'}</TableCell>
                   <TableCell>{getStatusBadge(purchase.status)}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
+                      {purchase.status !== 'delivered' && (
+                        <Button
+                          size="sm"
+                          className="bg-green-600 text-white hover:bg-green-700"
+                          onClick={() => onReceiveGoods(purchase.invoice)}
+                        >
+                          <PackageCheck className="w-4 h-4 mr-2" />
+                          Receive Goods
+                        </Button>
+                      )}
                       <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300">
                         <Eye className="w-4 h-4" />
                       </Button>
