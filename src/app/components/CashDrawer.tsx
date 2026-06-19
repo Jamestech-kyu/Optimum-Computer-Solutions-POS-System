@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
@@ -38,10 +38,17 @@ export function CashDrawer({
   cashExpensesToday,
   onOpenDay
 }: CashDrawerProps) {
-  const [openingBalance, setOpeningBalance] = useState(dayBalance.openingBalance.toString());
+  const nextOpeningBalance = dayBalance.closingBalance ?? dayBalance.openingBalance;
+  const [openingBalance, setOpeningBalance] = useState(nextOpeningBalance.toString());
   const expectedClosingBalance = dayBalance.openingBalance + cashSalesToday - cashExpensesToday;
   const openedAt = dayBalance.openedAt ? new Date(dayBalance.openedAt) : null;
-  const autoCloseAt = openedAt ? new Date(openedAt.getTime() + 24 * 60 * 60 * 1000) : null;
+  const autoCloseAt = openedAt ? new Date(openedAt.getTime() + 8 * 60 * 60 * 1000) : null;
+
+  useEffect(() => {
+    if (dayBalance.status === 'closed') {
+      setOpeningBalance(String(nextOpeningBalance));
+    }
+  }, [dayBalance.status, nextOpeningBalance]);
 
   const handleOpenDrawer = (event: React.FormEvent) => {
     event.preventDefault();
@@ -82,6 +89,11 @@ export function CashDrawer({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-600">Opening Balance</label>
+              {dayBalance.closingBalance !== null && (
+                <p className="text-xs text-gray-500">
+                  Carried forward from previous cashier: {formatCurrency(dayBalance.closingBalance)}
+                </p>
+              )}
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">KSh </span>
                 <Input
@@ -145,7 +157,7 @@ export function CashDrawer({
               <p className="text-sm font-medium text-green-900">Automatic close enabled</p>
             </div>
             <p className="text-sm text-green-800">
-              This drawer closes automatically 24 hours after opening. Manual closing is disabled.
+              This drawer closes automatically after the cashier's 8-hour shift. The closing amount becomes the next cashier's opening balance.
             </p>
             {openedAt && (
               <p className="mt-2 text-xs text-green-700">

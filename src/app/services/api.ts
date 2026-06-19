@@ -415,6 +415,7 @@ export interface ReportPdfExportInput {
 export interface CreateProductInput {
   name: string;
   sku: string;
+  barcode?: string;
   category_name?: string;
   generic_name?: string;
   brand?: string;
@@ -963,19 +964,29 @@ export const downloadProductImportTemplate = () => requestFile('/products/downlo
 
 export const downloadAvailableProducts = () => requestFile('/products/export/');
 
-export const exportReportPdf = (report: ReportPdfExportInput) => requestFile('/reports/reports/export/', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    format: 'pdf',
-    title: report.title,
-    company_name: report.companyName,
-    summary: report.summary,
-    rows: report.rows
-  })
-});
+export const exportReportPdf = async (report: ReportPdfExportInput) => {
+  const requestOptions = {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      format: 'pdf',
+      title: report.title,
+      company_name: report.companyName,
+      summary: report.summary,
+      rows: report.rows
+    })
+  };
+
+  try {
+    return await requestFile('/reports/export/', requestOptions);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (!message.includes('404')) throw error;
+    return requestFile('/reports/reports/export/', requestOptions);
+  }
+};
 
 export const importProductsFromExcel = async (file: File): Promise<ProductExcelImportResult> => {
   const token = getAccessToken();
@@ -1020,9 +1031,20 @@ export const importProductsFromExcel = async (file: File): Promise<ProductExcelI
   };
 };
 
-export const logout = () => {
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+export const logout = async () => {
+  const refresh = window.localStorage.getItem(REFRESH_TOKEN_KEY) || '';
+
+  try {
+    if (getAccessToken()) {
+      await request<{ message: string }>('/users/logout/', {
+        method: 'POST',
+        body: JSON.stringify({ refresh })
+      });
+    }
+  } finally {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
 };
 
 export const hasStoredSession = () => Boolean(getAccessToken());
@@ -1143,11 +1165,12 @@ export const clockOutUser = (userId: number) => request<BackendShiftSession>(`/u
 
 export const createProduct = async (product: CreateProductInput) => {
   const metadata = buildProductMetadata(product);
+  const barcode = product.barcode?.trim();
   const response = await request<BackendProduct>('/products/', {
     method: 'POST',
     body: JSON.stringify({
       name: product.name,
-      barcode: product.sku,
+      ...(barcode ? { barcode } : {}),
       generic_name: product.generic_name || product.parent_product || '',
       brand: product.brand || '',
       variant: product.variation || '',

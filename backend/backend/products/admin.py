@@ -22,7 +22,7 @@ class ProductAdmin(admin.ModelAdmin):
     list_display = ['id', 'name', 'brand', 'generic_name', 'variant', 'pack_size', 'sku', 'retail_price', 'stock_quantity', 'is_active']
     list_filter = ['is_active', 'category', 'brand', 'unit']
     search_fields = ['name', 'generic_name', 'brand', 'variant', 'pack_size', 'model_number', 'sku', 'barcode']
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['sku', 'created_at', 'updated_at']
     inlines = [ProductImageInline]
     
     fieldsets = (

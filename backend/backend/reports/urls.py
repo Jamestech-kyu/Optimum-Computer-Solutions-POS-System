@@ -10,5 +10,6 @@ router.register(r'saved-reports', SavedReportViewSet, basename='saved-report')
 # router.register(r'exports', ReportExportViewSet, basename='report-export')
 
 urlpatterns = [
+    path('export/', ReportViewSet.as_view({'post': 'export_report'}), name='report-export-pdf'),
     path('', include(router.urls)),
 ]

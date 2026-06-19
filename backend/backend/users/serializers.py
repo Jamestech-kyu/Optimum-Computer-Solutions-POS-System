@@ -130,6 +130,9 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_active_shift(self, obj):
         shift = obj.shift_sessions.filter(ended_at__isnull=True).order_by('-started_at').first()
+        if shift and not obj.is_online:
+            shift.clock_out()
+            return None
         return ShiftSessionSerializer(shift).data if shift else None
 
     def get_latest_shift(self, obj):

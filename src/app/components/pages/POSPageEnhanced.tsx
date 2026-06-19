@@ -87,7 +87,36 @@ const formatQuantityLevel = (quantity: number, unit: string) => {
 };
 
 const normalizeProductText = (value?: string) => (value || '').trim().toLowerCase();
-const getProductFamilyName = (product: POSProduct) => product.parentProduct || product.name;
+const removeBrandFromText = (text: string, brand?: string) => {
+  if (!brand) return text.trim();
+  return text
+    .replace(new RegExp(`\\b${brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'ig'), '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+const canonicalProductFamilyName = (value: string, product: POSProduct) => {
+  const normalized = normalizeProductText(value);
+  const normalizedCategory = normalizeProductText(product.category);
+  const searchable = normalizeProductText([
+    value,
+    product.name,
+    product.parentProduct,
+    product.variation,
+    product.packSize
+  ].filter(Boolean).join(' '));
+
+  if (/\bmilk\b/.test(searchable)) return 'Milk';
+  if (
+    /\b(laptop|laptops|notebook|notebooks)\b/.test(searchable) ||
+    (normalizedCategory === 'electronics' && normalized === 'computers')
+  ) return 'Laptops';
+  if (/\b(smartphone|smartphones|iphone|android phone|mobile phone|mobile phones)\b/.test(searchable)) return 'Mobile Phones';
+  return value.trim();
+};
+const getProductFamilyName = (product: POSProduct) => {
+  const rawFamily = product.parentProduct?.trim() || removeBrandFromText(product.name, product.brand) || product.name;
+  return canonicalProductFamilyName(rawFamily, product);
+};
 const getProductGroupKey = (product: POSProduct) => `${normalizeProductText(product.category)}:${normalizeProductText(getProductFamilyName(product))}`;
 const uniqueValues = (values: Array<string | undefined>) => Array.from(new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value))));
 const defaultPosCategories = [
@@ -447,6 +476,12 @@ export function POSPage({
     ? cart.filter(item => item.productId === selectedVariant.id).reduce((sum, item) => sum + (item.stockUnits * item.quantity), 0)
     : 0;
   const selectedAvailableStock = selectedVariant ? Math.max(0, selectedVariant.stock - selectedReservedStock) : 0;
+  const addableSubItem = selectedSubItem && selectedSubItem.stockUnits <= selectedAvailableStock
+    ? selectedSubItem
+    : selectedVariantSubItems.find(subItem => subItem.stockUnits <= selectedAvailableStock);
+  const addableSubItemPrice = selectedVariant && addableSubItem
+    ? addableSubItem.prices?.[customerType] ?? selectedVariant.prices[customerType] * addableSubItem.priceMultiplier
+    : selectedSubItemPrice;
 
   const variantOptionAvailable = (key: 'brand' | 'variation' | 'packSize', value: string) => {
     if (!selectedProductGroup) return false;
@@ -815,17 +850,17 @@ export function POSPage({
             setSelectedSubItemId('');
           }
         }}>
-          <DialogContent className="right-0 left-auto top-0 h-screen max-h-screen w-full max-w-lg translate-x-0 translate-y-0 rounded-none border-l border-gray-200 bg-white p-0 sm:rounded-none">
+          <DialogContent className="fixed inset-y-0 right-0 left-auto top-0 bottom-0 flex h-[100svh] max-h-[100svh] w-full max-w-lg translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-l border-gray-200 bg-white p-0 sm:rounded-none">
             {selectedProductGroup && selectedVariant && (
-              <div className="flex h-full flex-col">
-                <DialogHeader className="border-b border-gray-200 bg-blue-50 px-5 py-4">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <DialogHeader className="shrink-0 border-b border-gray-200 bg-blue-50 px-5 py-4">
                   <DialogTitle className="text-left text-lg text-gray-900">
                     {selectedProductGroup.name} Options
                   </DialogTitle>
                   <p className="text-sm text-gray-600">{selectedProductGroup.category} - choose the stocked variant before adding to cart</p>
                 </DialogHeader>
 
-                <div className="flex-1 space-y-5 overflow-y-auto p-5">
+                <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
                   <div className="flex gap-3 rounded-lg border border-gray-200 bg-white p-3">
                     <ImageWithFallback src={selectedVariant.image} alt={selectedVariant.name} className="h-16 w-16 rounded-md object-cover" />
                     <div className="min-w-0 flex-1">
@@ -926,25 +961,28 @@ export function POSPage({
                       })}
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-3 border-t border-gray-200 bg-white p-5">
-                  <Button
-                    type="button"
-                    className="flex-1 bg-green-600 text-white hover:bg-green-700"
-                    disabled={!selectedSubItem || selectedAvailableStock < selectedSubItem.stockUnits}
-                    onClick={() => {
-                      if (!selectedSubItem) return;
-                      addToCart(selectedVariant, selectedSubItem);
-                      setSelectedProductGroupKey(null);
-                      setSelectedSubItemId('');
-                    }}
-                  >
-                    Add to Cart - {formatCurrency(selectedSubItemPrice)}
-                  </Button>
-                  <Button type="button" variant="ghost" onClick={() => setSelectedProductGroupKey(null)}>
-                    Cancel
-                  </Button>
+                  <div className="flex items-center gap-3 border-t border-gray-200 bg-white pt-5">
+                    <Button
+                      type="button"
+                      className="min-h-11 flex-1 bg-green-600 text-white hover:bg-green-700"
+                      disabled={!addableSubItem}
+                      onClick={() => {
+                        if (!addableSubItem) {
+                          toast.warning('Select an available quantity');
+                          return;
+                        }
+                        addToCart(selectedVariant, addableSubItem);
+                        setSelectedProductGroupKey(null);
+                        setSelectedSubItemId('');
+                      }}
+                    >
+                      Add to Cart - {formatCurrency(addableSubItemPrice)}
+                    </Button>
+                    <Button type="button" variant="ghost" onClick={() => setSelectedProductGroupKey(null)}>
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}

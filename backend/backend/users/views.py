@@ -265,6 +265,9 @@ class UserViewSet(viewsets.ModelViewSet):
             )
 
         shift, created = start_shift_for_user(user)
+        user.is_online = True
+        user.last_activity = timezone.now()
+        user.save(update_fields=['is_online', 'last_activity'])
         response_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(ShiftSessionSerializer(shift).data, status=response_status)
 
@@ -297,6 +300,9 @@ class UserViewSet(viewsets.ModelViewSet):
             )
 
         active_shift.clock_out()
+        user.is_online = False
+        user.last_activity = timezone.now()
+        user.save(update_fields=['is_online', 'last_activity'])
         return Response(ShiftSessionSerializer(active_shift).data)
 
     @action(detail=False, methods=['get'], url_path='shift-status')

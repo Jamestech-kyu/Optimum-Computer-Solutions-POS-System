@@ -22,6 +22,7 @@ import { approveUser, changePassword, clockInUser, clockOutUser, createCustomer,
 import type { BackendCustomer, BackendRole, BackendSupplier, BackendUser, CreateCustomerInput, LoginResult, RegistrationRole } from './services/api';
 import { toast } from 'sonner';
 import { canAccessModule, firstAccessibleModule, normalizeRole, type AppModuleId } from './services/permissions';
+import { formatCurrency } from './components/utils/helpers';
 
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
 const LOCAL_NOTIFICATION_STORAGE_KEY = 'pos-local-notifications';
@@ -35,6 +36,7 @@ const demoExpenseSignatures = new Set([
   'Marketing|Social media ads|250|2026-01-10|Card'
 ]);
 const refreshNotificationBell = () => window.dispatchEvent(new Event('pos:notifications-changed'));
+const LAST_DRAWER_CLOSING_BALANCE_KEY = 'pos-last-drawer-closing-balance';
 const mergeSupplierInvoices = (
   currentInvoices: SupplierOrderInvoice[],
   backendInvoices: SupplierOrderInvoice[]
@@ -83,15 +85,34 @@ const pushLocalNotification = (title: string, message: string, key = `${title}:$
     detail: notification
   }));
 };
-const DRAWER_AUTO_CLOSE_MS = 24 * 60 * 60 * 1000;
+const DRAWER_AUTO_CLOSE_MS = 8 * 60 * 60 * 1000;
+
+const getLastDrawerClosingBalance = () => {
+  const savedBalance = window.localStorage.getItem(LAST_DRAWER_CLOSING_BALANCE_KEY);
+  const balance = Number(savedBalance);
+  return Number.isFinite(balance) && balance >= 0 ? balance : 0;
+};
 
 const createInitialDayBalance = (): DayBalance => ({
   date: getTodayKey(),
-  openingBalance: 0,
+  openingBalance: getLastDrawerClosingBalance(),
   closingBalance: null,
   status: 'closed',
   openedAt: null
 });
+
+const createClosedExpiredDayBalance = (balance: DayBalance): DayBalance => {
+  const closingBalance = balance.closingBalance ?? balance.openingBalance;
+  window.localStorage.setItem(LAST_DRAWER_CLOSING_BALANCE_KEY, String(closingBalance));
+
+  return {
+    date: getTodayKey(),
+    openingBalance: closingBalance,
+    closingBalance,
+    status: 'closed',
+    openedAt: balance.openedAt
+  };
+};
 
 const isDrawerExpired = (balance: DayBalance) => {
   if (balance.status !== 'open' || !balance.openedAt) return false;
@@ -142,7 +163,9 @@ export default function App() {
   const [dayBalance, setDayBalance] = useState<DayBalance>(() => {
     const savedBalance = window.localStorage.getItem('pos-day-balance');
     const balance = savedBalance ? JSON.parse(savedBalance) as DayBalance : createInitialDayBalance();
-    return balance.date === getTodayKey() && !isDrawerExpired(balance) ? balance : createInitialDayBalance();
+    if (balance.date === getTodayKey() && !isDrawerExpired(balance)) return balance;
+    if (isDrawerExpired(balance)) return createClosedExpiredDayBalance(balance);
+    return createInitialDayBalance();
   });
   const [supplierInvoices, setSupplierInvoices] = useState<SupplierOrderInvoice[]>(() => {
     const savedSupplierInvoices = window.localStorage.getItem('pos-supplier-invoices');
@@ -308,6 +331,8 @@ export default function App() {
           closingBalance: expectedCashToday,
           status: 'closed'
         } as DayBalance;
+
+        window.localStorage.setItem(LAST_DRAWER_CLOSING_BALANCE_KEY, String(expectedCashToday));
 
         if (isBackendConnected) {
           saveDayBalance(nextDayBalance).catch(error => console.warn('Unable to auto-close day balance in backend.', error));
@@ -512,8 +537,7 @@ export default function App() {
     }
   };
 
-  const performLogout = () => {
-    apiLogout();
+  const finishLocalLogout = () => {
     setIsAuthenticated(false);
     setUserRole(null);
     setUserName('');
@@ -524,6 +548,12 @@ export default function App() {
     setPasswordResetError('');
     setLastLoginPassword('');
     setActiveItem('dashboard');
+  };
+
+  const performLogout = () => {
+    apiLogout()
+      .catch(error => console.warn('Unable to end backend session cleanly.', error))
+      .finally(finishLocalLogout);
   };
 
   const handleTransactionComplete = (sale: CompletedSale) => {
@@ -638,6 +668,7 @@ export default function App() {
     const savedProduct = await createProduct({
       name: product.name,
       sku: product.sku,
+      barcode: product.barcode,
       category_name: product.category,
       generic_name: product.parentProduct,
       brand: product.brand,
@@ -1071,8 +1102,32 @@ export default function App() {
     setUsers(backendState.users);
   };
 
+  const closeCashDrawerForShiftEnd = (cashierName?: string) => {
+    if (dayBalance.status !== 'open') return;
+
+    const nextDayBalance = {
+      ...dayBalance,
+      closingBalance: expectedCashToday,
+      status: 'closed'
+    } as DayBalance;
+
+    window.localStorage.setItem(LAST_DRAWER_CLOSING_BALANCE_KEY, String(expectedCashToday));
+
+    setDayBalance(nextDayBalance);
+
+    if (isBackendConnected) {
+      saveDayBalance(nextDayBalance).catch(error => console.warn('Unable to save shift-end day balance to backend.', error));
+    }
+
+    toast.success('Cash drawer updated', {
+      description: `${cashierName || 'Cashier'} shift ended. Drawer closed at ${formatCurrency(expectedCashToday)}.`
+    });
+  };
+
   const handleUserClockOut = async (userId: number) => {
+    const clockedOutUser = users.find(user => user.id === userId);
     await clockOutUser(userId);
+    closeCashDrawerForShiftEnd(clockedOutUser?.username);
     const backendState = await loadBackendState(dayBalance);
     setUsers(backendState.users);
   };
@@ -1339,6 +1394,8 @@ export default function App() {
       closingBalance,
       status: 'closed'
       } as DayBalance;
+
+      window.localStorage.setItem(LAST_DRAWER_CLOSING_BALANCE_KEY, String(closingBalance));
 
       if (isBackendConnected) {
         saveDayBalance(nextDayBalance).catch(error => console.warn('Unable to save day balance to backend.', error));

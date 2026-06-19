@@ -3,6 +3,7 @@ import base64
 import uuid
 
 from django.core.files.base import ContentFile
+from django.db import IntegrityError
 from django.utils import timezone
 from django.utils.text import slugify
 from datetime import timedelta
@@ -129,6 +130,12 @@ class ProductSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Retail price must be greater than zero")
         return value
+
+    def validate_barcode(self, value):
+        barcode = (value or '').strip()
+        if barcode and Product.objects.filter(barcode=barcode).exists():
+            raise serializers.ValidationError("This barcode already exists. Clear it or generate a new barcode.")
+        return barcode
 
     def _apply_category_name(self, validated_data):
         category_name = validated_data.pop('category_name_input', '').strip()
@@ -310,7 +317,14 @@ class ProductSerializer(serializers.ModelSerializer):
         image_data = validated_data.pop('image_data', '')
         expiry_date = validated_data.pop('expiry_date', None)
         self._apply_category_name(validated_data)
-        instance = super().create(validated_data)
+        try:
+            instance = super().create(validated_data)
+        except IntegrityError as error:
+            if 'barcode' in str(error).lower():
+                raise serializers.ValidationError({
+                    'barcode': 'This barcode already exists. Clear it or generate a new barcode.'
+                }) from error
+            raise
         self._apply_image_data(instance, image_data)
         self._sync_inventory_records(instance, previous_stock=0)
         self._create_opening_batch(instance, expiry_date)

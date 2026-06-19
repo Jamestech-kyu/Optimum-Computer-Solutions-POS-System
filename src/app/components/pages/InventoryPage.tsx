@@ -118,6 +118,8 @@ type InventoryNotification = {
   time: string;
 };
 
+type AddItemFieldErrors = Partial<Record<'sku' | 'barcode' | 'name' | 'category' | 'brand' | 'json', string>>;
+
 type InventoryVariantSeed = {
   family: string;
   brand: string;
@@ -337,7 +339,7 @@ const seededInventoryCatalog: Array<{ family: string; aliases: string[]; variant
   },
   {
     family: 'Cooking Oil',
-    aliases: ['oil', 'vegetable oil'],
+    aliases: ['oil', 'vegetable oil', 'cooking olil', 'elianto', 'elinto'],
     variants: [
       { family: 'Cooking Oil', brand: 'Elianto', category: 'Food', itemType: 'Sunflower oil', size: '500ml', uom: 'pcs', reorderLevel: 16 },
       { family: 'Cooking Oil', brand: 'Elianto', category: 'Food', itemType: 'Sunflower oil', size: '1L', uom: 'pcs', reorderLevel: 12 },
@@ -606,13 +608,13 @@ const seededInventoryCatalog: Array<{ family: string; aliases: string[]; variant
     ]
   },
   {
-    family: 'Computers',
-    aliases: ['laptops', 'desktop computers'],
+    family: 'Laptops',
+    aliases: ['laptop', 'laptops', 'computers', 'desktop computers', 'notebook', 'notebooks'],
     variants: [
-      { family: 'Computers', brand: 'HP', category: 'Electronics', itemType: 'Laptop computer', size: 'Core i5 8GB', uom: 'pcs', reorderLevel: 2 },
-      { family: 'Computers', brand: 'Dell', category: 'Electronics', itemType: 'Laptop computer', size: 'Core i7 16GB', uom: 'pcs', reorderLevel: 2 },
-      { family: 'Computers', brand: 'Lenovo', category: 'Electronics', itemType: 'Business laptop', size: 'Core i5 8GB', uom: 'pcs', reorderLevel: 2 },
-      { family: 'Computers', brand: 'Asus', category: 'Electronics', itemType: 'Notebook laptop', size: 'Core i3 4GB', uom: 'pcs', reorderLevel: 2 }
+      { family: 'Laptops', brand: 'HP', category: 'Electronics', itemType: 'Laptop computer', size: 'Core i5 8GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Laptops', brand: 'Dell', category: 'Electronics', itemType: 'Laptop computer', size: 'Core i7 16GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Laptops', brand: 'Lenovo', category: 'Electronics', itemType: 'Business laptop', size: 'Core i5 8GB', uom: 'pcs', reorderLevel: 2 },
+      { family: 'Laptops', brand: 'Asus', category: 'Electronics', itemType: 'Notebook laptop', size: 'Core i3 4GB', uom: 'pcs', reorderLevel: 2 }
     ]
   },
   {
@@ -948,6 +950,40 @@ const buildInventoryItemName = (item: typeof blankAddItemForm) => {
     .join(' ');
 };
 
+const removeBrandFromText = (text: string, brand?: string) => {
+  if (!brand) return text.trim();
+  return text
+    .replace(new RegExp(`\\b${brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'ig'), '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const catalogMatchesText = (catalog: typeof seededInventoryCatalog[number], text: string) => {
+  const normalizedText = normalizeSeedSearch(text);
+  if (!normalizedText) return false;
+  const family = normalizeSeedSearch(catalog.family);
+  return normalizedText === family
+    || normalizedText.includes(family)
+    || catalog.aliases.some(alias => {
+      const normalizedAlias = normalizeSeedSearch(alias);
+      return normalizedText === normalizedAlias || normalizedText.includes(normalizedAlias);
+    });
+};
+
+const resolvePosFamilyFromForm = (item: typeof blankAddItemForm, itemName: string) => {
+  const searchable = [
+    item.parentProduct,
+    removeBrandFromText(itemName, item.brand),
+    item.itemType,
+    item.category
+  ].join(' ');
+  const matchingCatalog = seededInventoryCatalog.find(catalog => catalogMatchesText(catalog, searchable));
+
+  if (matchingCatalog) return matchingCatalog.family;
+  if (item.parentProduct.trim()) return removeBrandFromText(item.parentProduct, item.brand) || item.parentProduct.trim();
+  return removeBrandFromText(itemName, item.brand) || itemName;
+};
+
 const buildPosVariationLabel = (item: typeof blankAddItemForm) => (
   [item.itemType, item.color, item.notes]
     .map(value => value.trim())
@@ -965,6 +1001,37 @@ const buildPosPackSizeLabel = (item: typeof blankAddItemForm) => (
 const createGeneratedCode = (parts: string[]) => {
   const prefix = parts.join('-').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 18) || 'ITEM';
   return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+};
+
+const getAddItemFieldErrors = (message: string): AddItemFieldErrors => {
+  const normalized = message.toLowerCase();
+  const errors: AddItemFieldErrors = {};
+
+  if (normalized.includes('barcode')) {
+    errors.barcode = message;
+  }
+  if (normalized.includes('sku')) {
+    errors.sku = message;
+  }
+  if (normalized.includes('name')) {
+    errors.name = message;
+  }
+  if (normalized.includes('category')) {
+    errors.category = message;
+  }
+  if (normalized.includes('brand')) {
+    errors.brand = message;
+  }
+  if (normalized.includes('json') || normalized.includes('parse') || normalized.includes('syntax') || normalized.includes('unexpected token')) {
+    errors.json = message;
+  }
+
+  if ((normalized.includes('already exists') || normalized.includes('unique')) && !errors.barcode && !errors.sku) {
+    errors.barcode = message;
+    errors.sku = message;
+  }
+
+  return errors;
 };
 
 const readImageAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
@@ -1033,6 +1100,7 @@ export function InventoryPage({
   });
   const [imageError, setImageError] = useState('');
   const [formError, setFormError] = useState('');
+  const [addItemFieldErrors, setAddItemFieldErrors] = useState<AddItemFieldErrors>({});
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [bulkImportFile, setBulkImportFile] = useState<File | null>(null);
   const [bulkImportMessage, setBulkImportMessage] = useState('');
@@ -1081,6 +1149,20 @@ export function InventoryPage({
     [addItemForm.category, addItemForm.parentProduct]
   );
   const hasQuantityLevels = isQuantifiableUnit(addItemForm.uom);
+  const updateAddItemField = <K extends keyof typeof blankAddItemForm>(field: K, value: (typeof blankAddItemForm)[K]) => {
+    setAddItemForm(previous => ({ ...previous, [field]: value }));
+    if (field in addItemFieldErrors) {
+      setAddItemFieldErrors(previous => {
+        const next = { ...previous };
+        delete next[field as keyof AddItemFieldErrors];
+        return next;
+      });
+    }
+  };
+  const addItemInputClass = (field?: keyof AddItemFieldErrors, className = '') => {
+    const hasError = field ? Boolean(addItemFieldErrors[field]) : false;
+    return `${className} bg-gray-100 ${hasError ? 'border-red-500 text-red-700 focus-visible:ring-red-500' : 'border-gray-200'}`.trim();
+  };
   const updateAddItemUnit = (uom: string) => {
     setAddItemForm(previous => ({
       ...previous,
@@ -1760,6 +1842,7 @@ export function InventoryPage({
     overrides: Partial<Product> & {
       name?: string;
       sku?: string;
+      barcode?: string;
       brand?: string;
       parentProduct?: string;
       variation?: string;
@@ -1770,6 +1853,7 @@ export function InventoryPage({
     } = {}
   ): Product => {
     const itemName = overrides.name || buildInventoryItemName(addItemForm);
+    const parentProduct = overrides.parentProduct || resolvePosFamilyFromForm(addItemForm, itemName);
     const sku = overrides.sku || addItemForm.sku || createGeneratedCode([overrides.brand || addItemForm.brand, overrides.parentProduct || addItemForm.parentProduct || itemName]);
     const selectedSupplier = suppliers.find(supplier => String(supplier.id) === addItemForm.supplierId);
     const retailPrice = Number(addItemForm.retailPrice) || 0;
@@ -1795,9 +1879,10 @@ export function InventoryPage({
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       name: itemName,
       sku,
+      barcode: overrides.barcode || addItemForm.barcode.trim() || undefined,
       category: addItemForm.category,
       brand: overrides.brand || addItemForm.brand,
-      parentProduct: overrides.parentProduct || addItemForm.parentProduct,
+      parentProduct,
       variation: overrides.variation || buildPosVariationLabel(addItemForm),
       packSize: overrides.packSize || buildPosPackSizeLabel(addItemForm),
       supplierId: selectedSupplier?.id,
@@ -1825,6 +1910,7 @@ export function InventoryPage({
   const resetAddItemForm = () => {
     setAddItemForm(blankAddItemForm);
     setFormError('');
+    setAddItemFieldErrors({});
     setImageError('');
     window.localStorage.removeItem(inventoryDraftKey);
   };
@@ -1849,6 +1935,7 @@ export function InventoryPage({
           await onAddItem(buildProductFromForm({
             name: [seed.brand, seed.family, seed.itemType, seed.size, seed.color, seed.packSize].filter(Boolean).join(' '),
             sku: createSeedSku(seed),
+            barcode: undefined,
             brand: seed.brand,
             parentProduct: seed.family,
             variation: [seed.itemType, seed.color, seed.variation].filter(Boolean).join(' / ') || 'Standard',
@@ -1862,7 +1949,9 @@ export function InventoryPage({
         await onAddItem(buildProductFromForm());
       }
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'Inventory item could not be added.');
+      const message = error instanceof Error ? error.message : 'Inventory item could not be added.';
+      setFormError(message);
+      setAddItemFieldErrors(getAddItemFieldErrors(message));
       return;
     }
 
@@ -1878,21 +1967,24 @@ export function InventoryPage({
     <div className="space-y-6">
       <section className="space-y-3">
         <p className="text-sm font-semibold text-gray-900">Basic Information</p>
-        <Input placeholder="Product name" value={addItemForm.name} onChange={(event) => setAddItemForm({ ...addItemForm, name: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input placeholder="Product name" value={addItemForm.name} onChange={(event) => updateAddItemField('name', event.target.value)} className={addItemInputClass('name')} />
         <div className="flex gap-2">
-          <Input placeholder="SKU" value={addItemForm.sku} onChange={(event) => setAddItemForm({ ...addItemForm, sku: event.target.value })} className="bg-gray-100 border-gray-200" />
+          <Input placeholder="SKU" value={addItemForm.sku} onChange={(event) => updateAddItemField('sku', event.target.value)} className={addItemInputClass('sku')} />
           <Button type="button" variant="outline" onClick={() => setAddItemForm({ ...addItemForm, sku: createGeneratedCode([addItemForm.brand, addItemForm.parentProduct || addItemForm.name]) })}>
             Auto
           </Button>
         </div>
+        {addItemFieldErrors.sku && <p className="text-xs font-medium text-red-600">{addItemFieldErrors.sku}</p>}
         <div className="flex gap-2">
-          <Input placeholder="Barcode" value={addItemForm.barcode} onChange={(event) => setAddItemForm({ ...addItemForm, barcode: event.target.value })} className="bg-gray-100 border-gray-200" />
+          <Input placeholder="Barcode" value={addItemForm.barcode} onChange={(event) => updateAddItemField('barcode', event.target.value)} className={addItemInputClass('barcode')} />
           <Button type="button" variant="outline" onClick={() => setAddItemForm({ ...addItemForm, barcode: createGeneratedCode(['BAR', addItemForm.brand, addItemForm.name]) })}>
             Generate
           </Button>
         </div>
-        <Input placeholder="Brand *" value={addItemForm.brand} onChange={(event) => setAddItemForm({ ...addItemForm, brand: event.target.value })} className="bg-gray-100 border-gray-200" />
-        <Input placeholder="Category *" value={addItemForm.category} onChange={(event) => setAddItemForm({ ...addItemForm, category: event.target.value })} className="bg-gray-100 border-gray-200" />
+        {addItemFieldErrors.barcode && <p className="text-xs font-medium text-red-600">{addItemFieldErrors.barcode}</p>}
+        <Input placeholder="Brand *" value={addItemForm.brand} onChange={(event) => updateAddItemField('brand', event.target.value)} className={addItemInputClass('brand')} />
+        <Input placeholder="Category *" value={addItemForm.category} onChange={(event) => updateAddItemField('category', event.target.value)} className={addItemInputClass('category')} />
+        {addItemFieldErrors.json && <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">{addItemFieldErrors.json}</p>}
       </section>
 
       <section className="space-y-3 border-t border-gray-200 pt-5">
@@ -1921,7 +2013,7 @@ export function InventoryPage({
               </div>
               <Badge variant="outline">{selectedSeedCatalog.variants.length} options</Badge>
             </div>
-            <div className="space-y-2">
+            <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
               {selectedSeedCatalog.variants.map(seed => (
                 <div
                   key={`${seed.brand}-${seed.itemType}-${seed.size}-${seed.packSize || ''}`}
@@ -2054,11 +2146,14 @@ export function InventoryPage({
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">SKU / Barcode <span className="text-red-500">*</span></label>
                 <div className="flex">
-                  <Input placeholder="Enter SKU or scan barcode" value={addItemForm.sku} onChange={(event) => setAddItemForm({ ...addItemForm, sku: event.target.value })} className="rounded-r-none bg-gray-100 border-gray-200" />
+                  <Input placeholder="Enter SKU or scan barcode" value={addItemForm.sku} onChange={(event) => updateAddItemField('sku', event.target.value)} className={addItemInputClass(addItemFieldErrors.barcode ? 'barcode' : 'sku', 'rounded-r-none')} />
                   <Button type="button" variant="outline" className="rounded-l-none border-l-0 px-3" onClick={() => setAddItemForm({ ...addItemForm, sku: createGeneratedCode([addItemForm.brand, addItemForm.parentProduct || addItemForm.name]) })}>
                     <ScanLine className="h-4 w-4" />
                   </Button>
                 </div>
+                {(addItemFieldErrors.sku || addItemFieldErrors.barcode) && (
+                  <p className="text-xs font-medium text-red-600">{addItemFieldErrors.sku || addItemFieldErrors.barcode}</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Category <span className="text-red-500">*</span></label>
@@ -2125,7 +2220,7 @@ export function InventoryPage({
                     </div>
                     <Badge variant="outline">{selectedSeedCatalog.variants.length} options</Badge>
                   </div>
-                  <div className="grid gap-2 xl:grid-cols-2">
+                  <div className="grid max-h-80 gap-2 overflow-y-auto pr-1 xl:grid-cols-2">
                     {selectedSeedCatalog.variants.map(seed => (
                       <div key={getSeedVariantKey(seed)} className="grid grid-cols-[minmax(0,1fr)_120px] gap-3 rounded-md border border-gray-200 bg-white p-3">
                         <button type="button" onClick={() => applySeededVariant(seed)} className="min-w-0 text-left">

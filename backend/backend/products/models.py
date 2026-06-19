@@ -148,6 +148,12 @@ class Product(models.Model):
                     self.sku = f"{prefix}-000001"
             else:
                 self.sku = f"{prefix}-000001"
+        if not self.barcode:
+            while True:
+                generated_barcode = f"BC-{uuid.uuid4().hex[:12].upper()}"
+                if not Product.objects.filter(barcode=generated_barcode).exclude(pk=self.pk).exists():
+                    self.barcode = generated_barcode
+                    break
         super().save(*args, **kwargs)
     
     @property
