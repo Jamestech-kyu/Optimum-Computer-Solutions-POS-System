@@ -131,6 +131,8 @@ type InventoryVariantSeed = {
   reorderLevel: number;
 };
 
+type DrawerVariantStockMap = Record<string, string>;
+
 const unitOptions = ['pcs', 'kg', 'g', 'liter', 'ml', 'meter', 'dozen', 'box', 'pack', 'carton', 'tin', 'bag', 'pair'];
 const quantifiableUnitLabels: Record<string, { singular: string; plural: string }> = {
   kg: { singular: 'kg', plural: 'kg' },
@@ -761,6 +763,7 @@ const blankAddItemForm = {
   corporatePrice: '',
   loyalPrice: '',
   stock: '',
+  drawerVariantStocks: {} as DrawerVariantStockMap,
   reorderLevel: '',
   maximumStock: '',
   tax: '',
@@ -852,6 +855,11 @@ const createSeedSku = (seed: InventoryVariantSeed) => (
     .replace(/[^A-Z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 32)
+);
+
+const getSeedVariantKey = (seed: InventoryVariantSeed) => (
+  [seed.family, seed.brand, seed.itemType, seed.size, seed.color || '', seed.packSize || '', seed.variation || '']
+    .join('|')
 );
 
 const getSeededVariants = (category?: string, family?: string) => seededInventoryCatalog
@@ -1738,27 +1746,39 @@ export function InventoryPage({
     }));
   };
 
-  const resetAddItemForm = () => {
-    setAddItemForm(blankAddItemForm);
-    setFormError('');
-    setImageError('');
-    window.localStorage.removeItem(inventoryDraftKey);
+  const updateDrawerVariantStock = (seed: InventoryVariantSeed, stock: string) => {
+    setAddItemForm(previousForm => ({
+      ...previousForm,
+      drawerVariantStocks: {
+        ...previousForm.drawerVariantStocks,
+        [getSeedVariantKey(seed)]: stock
+      }
+    }));
   };
 
-  const handleAddItem = async () => {
-    if (!validateAddItem()) return;
-
-    const itemName = buildInventoryItemName(addItemForm);
-    const sku = addItemForm.sku || createGeneratedCode([addItemForm.brand, addItemForm.parentProduct || itemName]);
-    const posVariation = buildPosVariationLabel(addItemForm);
-    const posPackSize = buildPosPackSizeLabel(addItemForm);
+  const buildProductFromForm = (
+    overrides: Partial<Product> & {
+      name?: string;
+      sku?: string;
+      brand?: string;
+      parentProduct?: string;
+      variation?: string;
+      packSize?: string;
+      uom?: string;
+      stock?: number;
+      reorderLevel?: number;
+    } = {}
+  ): Product => {
+    const itemName = overrides.name || buildInventoryItemName(addItemForm);
+    const sku = overrides.sku || addItemForm.sku || createGeneratedCode([overrides.brand || addItemForm.brand, overrides.parentProduct || addItemForm.parentProduct || itemName]);
     const selectedSupplier = suppliers.find(supplier => String(supplier.id) === addItemForm.supplierId);
     const retailPrice = Number(addItemForm.retailPrice) || 0;
     const wholesalePrice = Number(addItemForm.wholesalePrice) || retailPrice;
     const corporatePrice = Number(addItemForm.corporatePrice) || wholesalePrice || retailPrice;
     const loyalPrice = Number(addItemForm.loyalPrice) || retailPrice;
     const buyingPrice = Number(addItemForm.buyingPrice) || 0;
-    const quantityLevels = isQuantifiableUnit(addItemForm.uom)
+    const uom = overrides.uom || addItemForm.uom;
+    const quantityLevels = isQuantifiableUnit(uom)
       ? addItemForm.quantityLevels.map(level => ({
           quantity: Number(level.quantity),
           label: level.label,
@@ -1771,43 +1791,85 @@ export function InventoryPage({
         }))
       : [];
 
+    return {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      name: itemName,
+      sku,
+      category: addItemForm.category,
+      brand: overrides.brand || addItemForm.brand,
+      parentProduct: overrides.parentProduct || addItemForm.parentProduct,
+      variation: overrides.variation || buildPosVariationLabel(addItemForm),
+      packSize: overrides.packSize || buildPosPackSizeLabel(addItemForm),
+      supplierId: selectedSupplier?.id,
+      supplierName: selectedSupplier?.name,
+      supplierSku: addItemForm.supplierSku.trim(),
+      buyingPrice,
+      prices: {
+        retail: retailPrice,
+        wholesale: wholesalePrice,
+        corporate: corporatePrice,
+        loyal: loyalPrice
+      },
+      profitMargin: buyingPrice > 0 ? ((retailPrice - buyingPrice) / buyingPrice) * 100 : 0,
+      uom,
+      stock: overrides.stock ?? (Number(addItemForm.stock) || 0),
+      reorderLevel: overrides.reorderLevel ?? (Number(addItemForm.reorderLevel) || 0),
+      maximumStock: Number(addItemForm.maximumStock) || undefined,
+      expiryDate: addItemForm.trackExpiry ? addItemForm.expiryDate : undefined,
+      quantityLevels,
+      image: addItemForm.imageUrl.trim() || addItemForm.images[0] || '',
+      tax: Number(addItemForm.tax) || 0
+    };
+  };
+
+  const resetAddItemForm = () => {
+    setAddItemForm(blankAddItemForm);
+    setFormError('');
+    setImageError('');
+    window.localStorage.removeItem(inventoryDraftKey);
+  };
+
+  const handleAddItem = async () => {
+    if (!validateAddItem()) return;
+
+    const stockedDrawerVariants = selectedSeedCatalog?.variants
+      .map(seed => {
+        const stockText = addItemForm.drawerVariantStocks[getSeedVariantKey(seed)] || '';
+        return {
+          seed,
+          stockText,
+          stock: Number(stockText)
+        };
+      })
+      .filter(item => item.stockText.trim() !== '' && Number.isFinite(item.stock) && item.stock >= 0) || [];
+
     try {
-      await onAddItem({
-        id: Date.now().toString(),
-        name: itemName,
-        sku,
-        category: addItemForm.category,
-        brand: addItemForm.brand,
-        parentProduct: addItemForm.parentProduct,
-        variation: posVariation,
-        packSize: posPackSize,
-        supplierId: selectedSupplier?.id,
-        supplierName: selectedSupplier?.name,
-        supplierSku: addItemForm.supplierSku.trim(),
-        buyingPrice,
-        prices: {
-          retail: retailPrice,
-          wholesale: wholesalePrice,
-          corporate: corporatePrice,
-          loyal: loyalPrice
-        },
-        profitMargin: buyingPrice > 0 ? ((retailPrice - buyingPrice) / buyingPrice) * 100 : 0,
-        uom: addItemForm.uom,
-        stock: Number(addItemForm.stock) || 0,
-        reorderLevel: Number(addItemForm.reorderLevel) || 0,
-        maximumStock: Number(addItemForm.maximumStock) || undefined,
-        expiryDate: addItemForm.trackExpiry ? addItemForm.expiryDate : undefined,
-        quantityLevels,
-        image: addItemForm.imageUrl.trim() || addItemForm.images[0] || '',
-        tax: Number(addItemForm.tax) || 0
-      });
+      if (stockedDrawerVariants.length > 0) {
+        for (const { seed, stock } of stockedDrawerVariants) {
+          await onAddItem(buildProductFromForm({
+            name: [seed.brand, seed.family, seed.itemType, seed.size, seed.color, seed.packSize].filter(Boolean).join(' '),
+            sku: createSeedSku(seed),
+            brand: seed.brand,
+            parentProduct: seed.family,
+            variation: [seed.itemType, seed.color, seed.variation].filter(Boolean).join(' / ') || 'Standard',
+            packSize: [seed.size, seed.packSize].filter(Boolean).join(' / ') || seed.uom,
+            uom: seed.uom,
+            stock,
+            reorderLevel: Number(addItemForm.reorderLevel) || seed.reorderLevel
+          }));
+        }
+      } else {
+        await onAddItem(buildProductFromForm());
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : 'Inventory item could not be added.');
       return;
     }
 
-    pushNotification('Product added', `${itemName} was added to inventory.`, 'green');
-    toast.success('Inventory item added');
+    const addedCount = stockedDrawerVariants.length || 1;
+    const addedLabel = addedCount === 1 ? buildInventoryItemName(addItemForm) : `${addedCount} drawer variants`;
+    pushNotification('Product added', `${addedLabel} added to inventory.`, 'green');
+    toast.success(addedCount === 1 ? 'Inventory item added' : 'Inventory variants added');
     resetAddItemForm();
     setIsAddItemOpen(false);
   };
@@ -1861,19 +1923,30 @@ export function InventoryPage({
             </div>
             <div className="space-y-2">
               {selectedSeedCatalog.variants.map(seed => (
-                <button
+                <div
                   key={`${seed.brand}-${seed.itemType}-${seed.size}-${seed.packSize || ''}`}
-                  type="button"
-                  onClick={() => applySeededVariant(seed)}
-                  className="w-full rounded-md border border-gray-200 bg-white p-3 text-left transition hover:border-blue-300 hover:bg-blue-50"
+                  className="grid gap-3 rounded-md border border-gray-200 bg-white p-3 transition hover:border-blue-300 hover:bg-blue-50 sm:grid-cols-[minmax(0,1fr)_120px]"
                 >
-                  <div className="text-sm font-medium text-gray-900">{seed.brand} {seed.itemType}</div>
-                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-500">
-                    <span>{seed.size}</span>
-                    {seed.packSize && <span>{seed.packSize}</span>}
-                    <span>{seed.category}</span>
+                  <button type="button" onClick={() => applySeededVariant(seed)} className="min-w-0 text-left">
+                    <div className="text-sm font-medium text-gray-900">{seed.brand} {seed.itemType}</div>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-gray-500">
+                      <span>{seed.size}</span>
+                      {seed.packSize && <span>{seed.packSize}</span>}
+                      <span>{seed.category}</span>
+                    </div>
+                  </button>
+                  <div>
+                    <label className="text-xs font-medium text-gray-500">Stock</label>
+                    <Input
+                      type="number"
+                      min="0"
+                      placeholder="0"
+                      value={addItemForm.drawerVariantStocks[getSeedVariantKey(seed)] || ''}
+                      onChange={(event) => updateDrawerVariantStock(seed, event.target.value)}
+                      className="mt-1 bg-gray-100 border-gray-200"
+                    />
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -2043,6 +2116,38 @@ export function InventoryPage({
                   </div>
                 </div>
               </div>
+              {selectedSeedCatalog && (
+                <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3 lg:col-span-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Drawer variants</p>
+                      <p className="text-xs text-gray-500">Enter opening stock for each SKU you want added under this POS group.</p>
+                    </div>
+                    <Badge variant="outline">{selectedSeedCatalog.variants.length} options</Badge>
+                  </div>
+                  <div className="grid gap-2 xl:grid-cols-2">
+                    {selectedSeedCatalog.variants.map(seed => (
+                      <div key={getSeedVariantKey(seed)} className="grid grid-cols-[minmax(0,1fr)_120px] gap-3 rounded-md border border-gray-200 bg-white p-3">
+                        <button type="button" onClick={() => applySeededVariant(seed)} className="min-w-0 text-left">
+                          <p className="truncate text-sm font-medium text-gray-900">{seed.brand} {seed.itemType}</p>
+                          <p className="mt-1 truncate text-xs text-gray-500">{[seed.size, seed.color, seed.packSize, seed.variation].filter(Boolean).join(' / ') || seed.uom}</p>
+                        </button>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500">Stock</label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={addItemForm.drawerVariantStocks[getSeedVariantKey(seed)] || ''}
+                            onChange={(event) => updateDrawerVariantStock(seed, event.target.value)}
+                            className="mt-1 bg-gray-100 border-gray-200"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Unit <span className="text-red-500">*</span></label>
                 <Select value={addItemForm.uom} onValueChange={updateAddItemUnit}>
