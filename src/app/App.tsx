@@ -806,6 +806,49 @@ export default function App() {
     setActiveItem('inventory');
   };
 
+  const applyReceivedStock = (invoice: SupplierOrderInvoice, deliveredItems: NonNullable<SupplierOrderInvoice['orderItems']>) => {
+    const receivedQuantityByProduct = deliveredItems.reduce((totals, item) => {
+      totals.set(item.productId, (totals.get(item.productId) || 0) + item.deliveredQuantity);
+      return totals;
+    }, new Map<string, number>());
+    const nextStockByProduct = products.reduce((stockMap, product) => {
+      const receivedQuantity = receivedQuantityByProduct.get(product.id) || 0;
+      if (receivedQuantity > 0) {
+        stockMap.set(product.id, product.stock + receivedQuantity);
+      }
+      return stockMap;
+    }, new Map<string, number>());
+
+    nextStockByProduct.forEach((nextStock, productId) => {
+      pendingStockUpdates.current.set(productId, nextStock);
+    });
+    if (nextStockByProduct.size > 0) {
+      persistPendingStockUpdates();
+    }
+
+    setProducts(previousProducts => previousProducts.map(product => {
+      const receivedQuantity = receivedQuantityByProduct.get(product.id) || 0;
+      return receivedQuantity > 0
+        ? { ...product, stock: product.stock + receivedQuantity }
+        : product;
+    }));
+
+    setStockMovements(previousMovements => [
+      ...deliveredItems.map(item => ({
+        id: `MOV-${invoice.id}-${item.productId}-${Date.now()}`,
+        item: item.productName,
+        type: 'in' as const,
+        quantity: item.deliveredQuantity,
+        date: invoice.date,
+        reason: `GRN ${invoice.goodsReceivingNote || invoice.id}`,
+        sourceInvoiceId: invoice.id
+      })),
+      ...previousMovements
+    ]);
+
+    return nextStockByProduct;
+  };
+
   const handleInventoryReceivedAndVerified = async (invoice: SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'>) => {
     const deliveredInvoice: SupplierOrderInvoice = {
       ...invoice,
@@ -816,6 +859,16 @@ export default function App() {
 
     if (isBackendConnected) {
       const savedInvoice = await receiveAndVerifySupplierInvoice(deliveredInvoice);
+      const nextStockByProduct = applyReceivedStock(deliveredInvoice, deliveredItems);
+      await Promise.all(
+        Array.from(nextStockByProduct.entries()).map(([productId, nextStock]) =>
+          updateProductStock(productId, nextStock)
+            .then(() => {
+              pendingStockUpdates.current.delete(productId);
+              persistPendingStockUpdates();
+            })
+        )
+      );
       setSupplierInvoices(previousInvoices => {
         const receivedInvoice = {
           ...savedInvoice,
@@ -857,24 +910,7 @@ export default function App() {
     setReorderRequest(null);
 
     if (deliveredItems.length > 0) {
-      setProducts(previousProducts => previousProducts.map(product => {
-        const deliveredItem = deliveredItems.find(item => item.productId === product.id);
-        return deliveredItem
-          ? { ...product, stock: product.stock + deliveredItem.deliveredQuantity }
-          : product;
-      }));
-      setStockMovements(previousMovements => [
-        ...deliveredItems.map(item => ({
-          id: `MOV-${deliveredInvoice.id}-${item.productId}-${Date.now()}`,
-          item: item.productName,
-          type: 'in' as const,
-          quantity: item.deliveredQuantity,
-          date: deliveredInvoice.date,
-          reason: `GRN ${deliveredInvoice.goodsReceivingNote || deliveredInvoice.id}`,
-          sourceInvoiceId: deliveredInvoice.id
-        })),
-        ...previousMovements
-      ]);
+      applyReceivedStock(deliveredInvoice, deliveredItems);
       pushLocalNotification(
         'Stock received',
         deliveredItems.map(item => `${item.productName} +${item.deliveredQuantity} pcs added to inventory`).join(', '),

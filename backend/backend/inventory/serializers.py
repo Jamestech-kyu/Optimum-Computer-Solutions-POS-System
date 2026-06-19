@@ -178,7 +178,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'po_number', 'uuid', 'order_date', 'subtotal', 'total',
-            'created_at', 'updated_at', 'approved_at'
+            'created_by', 'approved_by', 'created_at', 'updated_at', 'approved_at'
         ]
     
     def get_supplier_name(self, obj):
@@ -377,7 +377,8 @@ class StockCountSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'count_number', 'total_products', 'total_discrepancies',
-            'total_adjustment_value', 'created_at', 'completed_at'
+            'total_adjustment_value', 'created_by', 'completed_by',
+            'created_at', 'completed_at'
         ]
     
     def get_created_by_name(self, obj):
@@ -455,7 +456,8 @@ class StoreTransferSerializer(serializers.ModelSerializer):
             'items', 'transfer_items'
         ]
         read_only_fields = [
-            'id', 'transfer_number', 'transfer_date', 'created_at', 'updated_at'
+            'id', 'transfer_number', 'transfer_date', 'requested_by',
+            'approved_by', 'received_by', 'created_at', 'updated_at'
         ]
     
     def get_requested_by_name(self, obj):
@@ -567,7 +569,7 @@ class ImportJobSerializer(serializers.ModelSerializer):
             'error_log', 'created_by', 'created_by_name', 'created_at',
             'completed_at'
         ]
-        read_only_fields = ['id', 'job_id', 'created_at', 'completed_at']
+        read_only_fields = ['id', 'job_id', 'created_by', 'created_at', 'completed_at']
     
     def get_created_by_name(self, obj):
         return obj.created_by.get_full_name() or obj.created_by.username

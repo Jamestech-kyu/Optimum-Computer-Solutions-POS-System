@@ -69,6 +69,7 @@ export function ProcurementPage({
           reorderRequest={reorderRequest}
           onSupplierCreated={onSupplierCreated}
           onSupplierOrderSent={onSupplierOrderSent}
+          onViewAllSupplierOrders={() => setActiveView('purchases')}
         />
       ) : (
         <PurchasesPage supplierInvoices={supplierInvoices} onReceiveGoods={onOpenInventoryGrn} />

@@ -18,7 +18,9 @@ try:
     from decouple import config
 except ImportError:  # pragma: no cover
     # fallback if python-decouple isn't installed correctly
-    def config(key, default=None):
+    def config(key, default=None, cast=None):
+        if cast and default is not None:
+            return cast(default)
         return default
 
 
@@ -234,7 +236,17 @@ CHANNEL_LAYERS = {
 
 
 # EMAIL
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# Local development defaults to the console backend. Set EMAIL_BACKEND to
+# django.core.mail.backends.smtp.EmailBackend and provide the SMTP values below
+# to deliver purchase order emails to suppliers.
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='localhost')
+EMAIL_PORT = config('EMAIL_PORT', default=25, cast=int)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=False, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=20, cast=int)
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='pos-admin@example.com')
 
 

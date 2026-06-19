@@ -56,6 +56,7 @@ interface SuppliersPageProps {
   reorderRequest?: ReorderRequest | null;
   onSupplierCreated: (supplier: Omit<BackendSupplier, 'id'>) => Promise<void>;
   onSupplierOrderSent: (invoice: Omit<SupplierOrderInvoice, 'id'>) => Promise<void>;
+  onViewAllSupplierOrders?: () => void;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -197,7 +198,7 @@ const buildPurchaseOrderLine = (product?: POSProduct, quantity = 1): PurchaseOrd
   };
 };
 
-export function SuppliersPage({ products, suppliers: backendSuppliers, supplierInvoices, reorderRequest, onSupplierCreated, onSupplierOrderSent }: SuppliersPageProps) {
+export function SuppliersPage({ products, suppliers: backendSuppliers, supplierInvoices, reorderRequest, onSupplierCreated, onSupplierOrderSent, onViewAllSupplierOrders }: SuppliersPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'active' | 'withBalance' | 'withOrders'>('all');
   const [supplierStatusFilter, setSupplierStatusFilter] = useState('all');
@@ -1271,7 +1272,7 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
           <Card className="bg-white border-gray-200">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-gray-900">Recent Supplier Progress</CardTitle>
-              <Button variant="ghost" size="sm" className="text-blue-600">View all</Button>
+              <Button variant="ghost" size="sm" className="text-blue-600" onClick={onViewAllSupplierOrders}>View all</Button>
             </CardHeader>
             <CardContent className="space-y-4">
               {latestInvoice ? (

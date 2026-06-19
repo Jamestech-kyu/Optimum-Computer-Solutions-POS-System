@@ -11,9 +11,10 @@ from django.shortcuts import get_object_or_404
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.conf import settings
-from django.core.mail import EmailMessage
+from django.core.mail import EmailMultiAlternatives
 from django.urls import reverse
 from decimal import Decimal
+from html import escape
 import pandas as pd
 
 import io
@@ -97,6 +98,82 @@ def build_purchase_order_pdf(purchase_order):
     pdf.write(f'trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF'.encode('utf-8'))
     pdf.seek(0)
     return pdf
+
+
+def format_decimal(value):
+    return f'{Decimal(value):,.2f}'
+
+
+def format_quantity(value):
+    return f'{Decimal(value):g}'
+
+
+def build_purchase_order_email_body(purchase_order, pdf_url):
+    items = list(purchase_order.items.select_related('product'))
+    plain_item_lines = [
+        f'{index}. {item.product.name} ({item.product.supplier_sku or item.product.sku}) - '
+        f'{format_quantity(item.quantity)} x KES {format_decimal(item.unit_cost)} = KES {format_decimal(item.total)}'
+        for index, item in enumerate(items, start=1)
+    ]
+
+    plain_body = (
+        f'Dear {purchase_order.supplier.name},\n\n'
+        f'Please process purchase order {purchase_order.po_number}.\n\n'
+        'Items ordered:\n'
+        f'{chr(10).join(plain_item_lines) if plain_item_lines else "No items captured on this purchase order."}\n\n'
+        f'Subtotal: KES {format_decimal(purchase_order.subtotal)}\n'
+        f'Tax: KES {format_decimal(purchase_order.tax_amount)}\n'
+        f'Shipping: KES {format_decimal(purchase_order.shipping_cost)}\n'
+        f'Discount: KES {format_decimal(purchase_order.discount_amount)}\n'
+        f'Total: KES {format_decimal(purchase_order.total)}\n\n'
+        f'PDF copy/download link: {pdf_url}\n\n'
+        'Regards,\nPOS Admin'
+    )
+
+    item_rows = ''.join(
+        '<tr>'
+        f'<td style="padding:8px;border:1px solid #d0d7de;">{index}</td>'
+        f'<td style="padding:8px;border:1px solid #d0d7de;">{escape(item.product.name)}</td>'
+        f'<td style="padding:8px;border:1px solid #d0d7de;">{escape(item.product.supplier_sku or item.product.sku)}</td>'
+        f'<td style="padding:8px;border:1px solid #d0d7de;text-align:right;">{format_quantity(item.quantity)}</td>'
+        f'<td style="padding:8px;border:1px solid #d0d7de;text-align:right;">KES {format_decimal(item.unit_cost)}</td>'
+        f'<td style="padding:8px;border:1px solid #d0d7de;text-align:right;">KES {format_decimal(item.total)}</td>'
+        '</tr>'
+        for index, item in enumerate(items, start=1)
+    ) or (
+        '<tr><td colspan="6" style="padding:8px;border:1px solid #d0d7de;">'
+        'No items captured on this purchase order.'
+        '</td></tr>'
+    )
+
+    html_body = f'''
+    <p>Dear {escape(purchase_order.supplier.name)},</p>
+    <p>Please process purchase order <strong>{escape(purchase_order.po_number)}</strong>.</p>
+    <table style="border-collapse:collapse;width:100%;font-family:Arial,sans-serif;font-size:14px;">
+      <thead>
+        <tr style="background:#f6f8fa;">
+          <th style="padding:8px;border:1px solid #d0d7de;text-align:left;">#</th>
+          <th style="padding:8px;border:1px solid #d0d7de;text-align:left;">Item</th>
+          <th style="padding:8px;border:1px solid #d0d7de;text-align:left;">Supplier SKU</th>
+          <th style="padding:8px;border:1px solid #d0d7de;text-align:right;">Qty</th>
+          <th style="padding:8px;border:1px solid #d0d7de;text-align:right;">Unit Cost</th>
+          <th style="padding:8px;border:1px solid #d0d7de;text-align:right;">Line Total</th>
+        </tr>
+      </thead>
+      <tbody>{item_rows}</tbody>
+    </table>
+    <p>
+      Subtotal: KES {format_decimal(purchase_order.subtotal)}<br>
+      Tax: KES {format_decimal(purchase_order.tax_amount)}<br>
+      Shipping: KES {format_decimal(purchase_order.shipping_cost)}<br>
+      Discount: KES {format_decimal(purchase_order.discount_amount)}<br>
+      <strong>Total: KES {format_decimal(purchase_order.total)}</strong>
+    </p>
+    <p>A PDF copy is attached. You can also download it here: <a href="{escape(pdf_url)}">{escape(pdf_url)}</a></p>
+    <p>Regards,<br>POS Admin</p>
+    '''
+
+    return plain_body, html_body
 
 
 class BatchViewSet(viewsets.ModelViewSet):
@@ -433,19 +510,15 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         pdf_url = request.build_absolute_uri(reverse('purchase-order-download-pdf', kwargs={'pk': po.pk}))
         pdf_buffer = build_purchase_order_pdf(po)
         subject = f'Purchase Order {po.po_number}'
-        message = (
-            f'Dear {po.supplier.name},\n\n'
-            f'Please find attached purchase order {po.po_number}.\n\n'
-            f'You can also download it here:\n{pdf_url}\n\n'
-            'Regards,\nPOS Admin'
-        )
+        plain_body, html_body = build_purchase_order_email_body(po, pdf_url)
 
-        email = EmailMessage(
+        email = EmailMultiAlternatives(
             subject=subject,
-            body=message,
+            body=plain_body,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[supplier_email],
         )
+        email.attach_alternative(html_body, 'text/html')
         email.attach(f'{po.po_number}.pdf', pdf_buffer.getvalue(), 'application/pdf')
         email.send(fail_silently=False)
 

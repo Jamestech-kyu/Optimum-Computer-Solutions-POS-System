@@ -14,11 +14,31 @@ interface PurchasesPageProps {
   onReceiveGoods: (invoice: SupplierOrderInvoice) => void;
 }
 
+type PurchaseRow = {
+  id: string;
+  supplier: string;
+  date: string;
+  amount: number;
+  status: SupplierOrderInvoice['status'];
+  items: number;
+  deliveryNote?: string;
+  goodsReceivingNote?: string;
+  receivingLocation?: string;
+  receivingNotes?: string;
+  requestedItems: number;
+  deliveredItems: number;
+  pendingItems: number;
+  orderItems: NonNullable<SupplierOrderInvoice['orderItems']>;
+  invoice: SupplierOrderInvoice;
+};
+
 export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const livePurchases = supplierInvoices.map(invoice => ({
+  const [selectedPurchase, setSelectedPurchase] = useState<PurchaseRow | null>(null);
+  const [documentPurchase, setDocumentPurchase] = useState<PurchaseRow | null>(null);
+  const livePurchases: PurchaseRow[] = supplierInvoices.map(invoice => ({
     id: invoice.id.replace('SUP-INV', 'PUR'),
     supplier: invoice.supplierName,
     date: invoice.date,
@@ -290,10 +310,24 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
                           Receive Goods
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-blue-600 hover:text-blue-300"
+                        title="View purchase details"
+                        aria-label={`View ${purchase.id} details`}
+                        onClick={() => setSelectedPurchase(purchase)}
+                      >
                         <Eye className="w-4 h-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-green-600 hover:text-green-300">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-green-600 hover:text-green-300"
+                        title="View GRN and delivery note"
+                        aria-label={`View ${purchase.id} GRN and delivery note`}
+                        onClick={() => setDocumentPurchase(purchase)}
+                      >
                         <FileText className="w-4 h-4" />
                       </Button>
                     </div>
@@ -304,6 +338,139 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
           </Table>
         </CardContent>
       </Card>
+
+      {selectedPurchase && (
+        <Dialog open={!!selectedPurchase} onOpenChange={() => setSelectedPurchase(null)}>
+          <DialogContent className="bg-white border-gray-200 max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900">Purchase Details</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              <div className="flex items-start justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 p-4">
+                <div>
+                  <p className="font-semibold text-gray-900">{selectedPurchase.id}</p>
+                  <p className="text-gray-500">{selectedPurchase.supplier}</p>
+                </div>
+                {getStatusBadge(selectedPurchase.status)}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-gray-500">Order Date</p>
+                  <p className="font-medium text-gray-900">{selectedPurchase.date}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Total Amount</p>
+                  <p className="font-medium text-gray-900">KSh {selectedPurchase.amount.toFixed(2)}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Requested</p>
+                  <p className="font-medium text-gray-900">{selectedPurchase.requestedItems}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Delivered</p>
+                  <p className="font-medium text-gray-900">{selectedPurchase.deliveredItems}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Pending</p>
+                  <p className="font-medium text-gray-900">{selectedPurchase.pendingItems}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Payment Method</p>
+                  <p className="font-medium text-gray-900">{selectedPurchase.invoice.paymentMethod || 'Not captured'}</p>
+                </div>
+              </div>
+
+              {selectedPurchase.orderItems.length > 0 && (
+                <div className="overflow-hidden rounded-md border border-gray-200">
+                  {selectedPurchase.orderItems.map((item) => (
+                    <div key={`${item.productId}-${item.productName}`} className="grid gap-3 border-b border-gray-200 px-3 py-2 last:border-b-0 sm:grid-cols-[1fr_auto]">
+                      <div>
+                        <p className="font-medium text-gray-900">{item.productName}</p>
+                        <p className="text-xs text-gray-500">{item.sku || item.supplierSku || 'No SKU'} | KSh {item.unitCost.toFixed(2)}</p>
+                      </div>
+                      <div className="text-xs text-gray-600 sm:text-right">
+                        <p>Requested: {item.requestedQuantity}</p>
+                        <p className="text-green-600">Delivered: {item.deliveredQuantity}</p>
+                        <p className="text-orange-600">Pending: {item.pendingQuantity}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={() => setSelectedPurchase(null)}>Close</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {documentPurchase && (
+        <Dialog open={!!documentPurchase} onOpenChange={() => setDocumentPurchase(null)}>
+          <DialogContent className="bg-white border-gray-200 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900">GRN & Delivery Note</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-gray-900">{documentPurchase.goodsReceivingNote || 'GRN Pending'}</p>
+                    <p className="text-gray-500">{documentPurchase.id}</p>
+                  </div>
+                  <Badge className={documentPurchase.goodsReceivingNote ? 'bg-green-500/20 text-green-600' : 'bg-orange-500/20 text-orange-600'}>
+                    {documentPurchase.goodsReceivingNote ? 'Created' : 'Pending'}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-gray-500">Supplier</p>
+                  <p className="font-medium text-gray-900">{documentPurchase.supplier}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Order Date</p>
+                  <p className="font-medium text-gray-900">{documentPurchase.date}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Delivery Note</p>
+                  <p className="font-medium text-gray-900">{documentPurchase.deliveryNote || 'Not captured'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Received</p>
+                  <p className="font-medium text-gray-900">{documentPurchase.deliveredItems} of {documentPurchase.requestedItems}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Location</p>
+                  <p className="font-medium text-gray-900">{documentPurchase.receivingLocation || 'Not captured'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Pending</p>
+                  <p className="font-medium text-gray-900">{documentPurchase.pendingItems}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-gray-500">Receiving Notes</p>
+                <p className="font-medium text-gray-900">{documentPurchase.receivingNotes || 'No notes captured'}</p>
+              </div>
+
+              {!documentPurchase.goodsReceivingNote && (
+                <div className="rounded-md border border-orange-200 bg-orange-50 p-3 text-orange-700">
+                  A GRN will be available after goods are received for this order.
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={() => setDocumentPurchase(null)}>Close</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

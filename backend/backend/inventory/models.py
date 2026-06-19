@@ -306,7 +306,8 @@ class PurchaseOrder(models.Model):
     def calculate_totals(self):
         items = self.items.all()
         self.subtotal = sum(item.subtotal for item in items)
-        self.tax_amount = self.subtotal * (self.tax_rate / 100)
+        tax_rate = Decimal(str(self.tax_rate)) / Decimal('100')
+        self.tax_amount = self.subtotal * tax_rate
         self.total = self.subtotal + self.tax_amount + self.shipping_cost - self.discount_amount
         self.save(update_fields=['subtotal', 'tax_amount', 'total'])
         return self.total
@@ -373,7 +374,8 @@ class PurchaseOrderItem(models.Model):
     
     def save(self, *args, **kwargs):
         self.subtotal = self.unit_cost * self.quantity
-        self.discount_amount = self.subtotal * (self.discount_percentage / 100)
+        discount_rate = Decimal(str(self.discount_percentage)) / Decimal('100')
+        self.discount_amount = self.subtotal * discount_rate
         self.total = self.subtotal - self.discount_amount
         super().save(*args, **kwargs)
         self.purchase_order.calculate_totals()
