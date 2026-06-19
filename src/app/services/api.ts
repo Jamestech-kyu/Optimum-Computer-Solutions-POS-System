@@ -405,6 +405,13 @@ export interface ProductExcelImportResult {
   }>;
 }
 
+export interface ReportPdfExportInput {
+  title: string;
+  companyName?: string;
+  summary: Record<string, string | number>;
+  rows: Array<{ metric: string; value: string | number }>;
+}
+
 export interface CreateProductInput {
   name: string;
   sku: string;
@@ -955,6 +962,20 @@ const requestFile = async (path: string, options?: RequestInit): Promise<Blob> =
 export const downloadProductImportTemplate = () => requestFile('/products/download-template/');
 
 export const downloadAvailableProducts = () => requestFile('/products/export/');
+
+export const exportReportPdf = (report: ReportPdfExportInput) => requestFile('/reports/reports/export/', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    format: 'pdf',
+    title: report.title,
+    company_name: report.companyName,
+    summary: report.summary,
+    rows: report.rows
+  })
+});
 
 export const importProductsFromExcel = async (file: File): Promise<ProductExcelImportResult> => {
   const token = getAccessToken();

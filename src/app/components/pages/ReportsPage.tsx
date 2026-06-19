@@ -1,11 +1,13 @@
 import React, { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, Legend, ReferenceLine } from 'recharts';
-import { Download, TrendingUp, DollarSign, ShoppingCart, Users, Package, Receipt } from 'lucide-react';
+import { Download, Loader2, TrendingUp, DollarSign, ShoppingCart, Users, Package, Receipt } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
+import { exportReportPdf } from '../../services/api';
 import type { BusinessExpense, SupplierOrderInvoice } from '../../types/supplierOrder';
 import type { CompletedSale, DayBalance, POSProduct } from './POSPageEnhanced';
 
@@ -46,10 +48,21 @@ const compactCurrency = (value: number) => {
   return formatCurrency(value);
 };
 const shortLabel = (value: string) => value.length > 18 ? `${value.slice(0, 18)}...` : value;
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
 
 export function ReportsPage({ products, completedSales, expenses, supplierInvoices, dayBalance }: ReportsPageProps) {
   const [dateRange, setDateRange] = useState<DateRange>('30days');
   const [reportAccount, setReportAccount] = useState<ReportAccount>('all');
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const startDate = useMemo(() => {
     const date = new Date();
     date.setDate(date.getDate() - rangeDays[dateRange]);
@@ -216,52 +229,29 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
     }
   };
 
-  const exportPdf = () => {
+  const exportPdf = async () => {
     const summary = accountSummaries[reportAccount];
-    const printWindow = window.open('', '_blank', 'width=900,height=700');
-    if (!printWindow) return;
-
-    const rows = summary.rows
-      .map(([metric, value]) => `<tr><td>${metric}</td><td>${value}</td></tr>`)
-      .join('');
-    const generatedAt = new Date().toLocaleString();
-
-    printWindow.document.write(`
-      <!doctype html>
-      <html>
-        <head>
-          <title>${summary.label} Report</title>
-          <style>
-            body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
-            h1 { margin: 0 0 4px; font-size: 26px; }
-            p { margin: 0 0 18px; color: #4b5563; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #d1d5db; padding: 10px 12px; text-align: left; }
-            th { background: #f3f4f6; }
-            .meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
-            .box { border: 1px solid #d1d5db; padding: 12px; }
-            .label { color: #6b7280; font-size: 12px; text-transform: uppercase; }
-            .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
-          </style>
-        </head>
-        <body>
-          <h1>${summary.label} Report</h1>
-          <p>Generated ${generatedAt} for ${dateRange.replace('days', ' days').replace('months', ' months')}.</p>
-          <div class="meta">
-            <div class="box"><div class="label">Revenue</div><div class="value">${formatCurrency(revenue)}</div></div>
-            <div class="box"><div class="label">Expenses</div><div class="value">${formatCurrency(expenseTotal)}</div></div>
-            <div class="box"><div class="label">Profit</div><div class="value">${formatCurrency(grossProfit)}</div></div>
-          </div>
-          <table>
-            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    setIsExportingPdf(true);
+    try {
+      const blob = await exportReportPdf({
+        title: `${summary.label} Report`,
+        summary: {
+          Revenue: formatCurrency(revenue),
+          Expenses: formatCurrency(expenseTotal),
+          Profit: formatCurrency(grossProfit),
+          Period: dateRange.replace('days', ' days').replace('months', ' months')
+        },
+        rows: summary.rows.map(([metric, value]) => ({ metric, value }))
+      });
+      downloadBlob(blob, `${summary.label.toLowerCase().replace(/\s+/g, '-')}-report.pdf`);
+      toast.success('PDF report exported');
+    } catch (error) {
+      toast.error('PDF export failed', {
+        description: error instanceof Error ? error.message : 'Please check the backend server and try again.'
+      });
+    } finally {
+      setIsExportingPdf(false);
+    }
   };
 
   return (
@@ -297,9 +287,9 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
               <SelectItem value="1year">Last Year</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={exportPdf}>
-            <Download className="w-4 h-4 mr-2" />
-            Export PDF
+          <Button variant="outline" onClick={exportPdf} disabled={isExportingPdf}>
+            {isExportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+            {isExportingPdf ? 'Exporting' : 'Export PDF'}
           </Button>
         </div>
       </div>

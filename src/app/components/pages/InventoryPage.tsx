@@ -154,6 +154,7 @@ const chartTooltipStyle = {
   color: '#0F172A'
 };
 const inventoryDraftKey = 'pos-inventory-item-draft-v3';
+const inventoryLayoutKey = 'pos-inventory-layout-v1';
 
 const seededInventoryCatalog: Array<{ family: string; aliases: string[]; variants: InventoryVariantSeed[] }> = [
   {
@@ -939,6 +940,20 @@ const buildInventoryItemName = (item: typeof blankAddItemForm) => {
     .join(' ');
 };
 
+const buildPosVariationLabel = (item: typeof blankAddItemForm) => (
+  [item.itemType, item.color, item.notes]
+    .map(value => value.trim())
+    .filter(Boolean)
+    .join(' / ') || 'Standard'
+);
+
+const buildPosPackSizeLabel = (item: typeof blankAddItemForm) => (
+  [item.size, item.weight, item.packSize]
+    .map(value => value.trim())
+    .filter(Boolean)
+    .join(' / ') || item.uom || 'Each'
+);
+
 const createGeneratedCode = (parts: string[]) => {
   const prefix = parts.join('-').toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 18) || 'ITEM';
   return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-5)}`;
@@ -1031,7 +1046,14 @@ export function InventoryPage({
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [supplierFilter, setSupplierFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [tableView, setTableView] = useState<'table' | 'grid'>('table');
+  const [tableView, setTableView] = useState<'table' | 'grid'>(() => {
+    try {
+      const savedLayout = window.localStorage.getItem(inventoryLayoutKey);
+      return savedLayout === 'grid' || savedLayout === 'table' ? savedLayout : 'table';
+    } catch {
+      return 'table';
+    }
+  });
   const [selectedInventoryIds, setSelectedInventoryIds] = useState<string[]>([]);
 
   const activeSuppliers = suppliers.filter(supplier => supplier.is_active !== false);
@@ -1170,6 +1192,14 @@ export function InventoryPage({
     window.addEventListener('beforeunload', warnUnsavedChanges);
     return () => window.removeEventListener('beforeunload', warnUnsavedChanges);
   }, [addItemForm, isAddItemOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(inventoryLayoutKey, tableView);
+    } catch {
+      // Ignore local storage errors.
+    }
+  }, [tableView]);
 
   useEffect(() => {
     if (!pendingGrnRequest?.orderItems?.length) {
@@ -1720,6 +1750,8 @@ export function InventoryPage({
 
     const itemName = buildInventoryItemName(addItemForm);
     const sku = addItemForm.sku || createGeneratedCode([addItemForm.brand, addItemForm.parentProduct || itemName]);
+    const posVariation = buildPosVariationLabel(addItemForm);
+    const posPackSize = buildPosPackSizeLabel(addItemForm);
     const selectedSupplier = suppliers.find(supplier => String(supplier.id) === addItemForm.supplierId);
     const retailPrice = Number(addItemForm.retailPrice) || 0;
     const wholesalePrice = Number(addItemForm.wholesalePrice) || retailPrice;
@@ -1747,11 +1779,8 @@ export function InventoryPage({
         category: addItemForm.category,
         brand: addItemForm.brand,
         parentProduct: addItemForm.parentProduct,
-        variation: [addItemForm.itemType, addItemForm.notes, addItemForm.description, addItemForm.size, addItemForm.weight, addItemForm.color, addItemForm.packSize]
-          .map(value => value.trim())
-          .filter(Boolean)
-          .join(' / '),
-        packSize: addItemForm.packSize || addItemForm.size || addItemForm.weight,
+        variation: posVariation,
+        packSize: posPackSize,
         supplierId: selectedSupplier?.id,
         supplierName: selectedSupplier?.name,
         supplierSku: addItemForm.supplierSku.trim(),
@@ -1806,7 +1835,7 @@ export function InventoryPage({
 
       <section className="space-y-3 border-t border-gray-200 pt-5">
         <p className="text-sm font-semibold text-gray-900">Product Details</p>
-        <Input placeholder="Product family (e.g. Milk, Sugar, Bread)" value={addItemForm.parentProduct} onChange={(event) => setAddItemForm({ ...addItemForm, parentProduct: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input placeholder="Product family / POS group (e.g. Milk, Sugar, Shirts)" value={addItemForm.parentProduct} onChange={(event) => setAddItemForm({ ...addItemForm, parentProduct: event.target.value })} className="bg-gray-100 border-gray-200" />
         <div className="flex flex-wrap gap-2">
           {seededInventoryCatalog.map(catalog => (
             <Button
@@ -1849,15 +1878,15 @@ export function InventoryPage({
             </div>
           </div>
         )}
-        <Input placeholder="Variant / flavour" value={addItemForm.itemType} onChange={(event) => setAddItemForm({ ...addItemForm, itemType: event.target.value })} className="bg-gray-100 border-gray-200" />
-        <Input placeholder="Size (e.g. 500ml)" value={addItemForm.size} onChange={(event) => setAddItemForm({ ...addItemForm, size: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input placeholder="Type / flavor / graphic (POS variant button)" value={addItemForm.itemType} onChange={(event) => setAddItemForm({ ...addItemForm, itemType: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input placeholder="Size (POS pack/size button, e.g. 500ml)" value={addItemForm.size} onChange={(event) => setAddItemForm({ ...addItemForm, size: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Input placeholder="Weight" value={addItemForm.weight} onChange={(event) => setAddItemForm({ ...addItemForm, weight: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Select value={addItemForm.uom} onValueChange={updateAddItemUnit}>
           <SelectTrigger className="bg-gray-100 border-gray-200"><SelectValue placeholder="Unit" /></SelectTrigger>
           <SelectContent>{unitOptions.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}</SelectContent>
         </Select>
-        <Input placeholder="Color" value={addItemForm.color} onChange={(event) => setAddItemForm({ ...addItemForm, color: event.target.value })} className="bg-gray-100 border-gray-200" />
-        <Input placeholder="Pack / count" value={addItemForm.packSize} onChange={(event) => setAddItemForm({ ...addItemForm, packSize: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input placeholder="Color (POS variant button)" value={addItemForm.color} onChange={(event) => setAddItemForm({ ...addItemForm, color: event.target.value })} className="bg-gray-100 border-gray-200" />
+        <Input placeholder="Pack / count (POS pack/size button)" value={addItemForm.packSize} onChange={(event) => setAddItemForm({ ...addItemForm, packSize: event.target.value })} className="bg-gray-100 border-gray-200" />
         <Input placeholder="Notes" value={addItemForm.notes} onChange={(event) => setAddItemForm({ ...addItemForm, notes: event.target.value })} className="bg-gray-100 border-gray-200" />
       </section>
 
@@ -1930,6 +1959,9 @@ export function InventoryPage({
     const retailPrice = Number(addItemForm.retailPrice) || 0;
     const buyingPrice = Number(addItemForm.buyingPrice) || 0;
     const profitMargin = buyingPrice > 0 && retailPrice > 0 ? ((retailPrice - buyingPrice) / buyingPrice) * 100 : null;
+    const posProductGroup = addItemForm.parentProduct || buildInventoryItemName(addItemForm) || 'Product group';
+    const posVariation = buildPosVariationLabel(addItemForm);
+    const posPackSize = buildPosPackSizeLabel(addItemForm);
 
     return (
       <div className="grid grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -1966,13 +1998,13 @@ export function InventoryPage({
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <label className="text-sm font-medium text-gray-700">Sub Category</label>
+                  <label className="text-sm font-medium text-gray-700">Product Family / POS Group</label>
                   <span className="text-xs text-gray-500">{seededSubcategoryOptions.length} listed</span>
                 </div>
                 <SearchableSeedSelect
                   value={addItemForm.parentProduct}
                   options={seededSubcategoryOptions}
-                  placeholder="Select sub category"
+                  placeholder="Select product family"
                   onChange={handleSeedSubcategoryChange}
                 />
               </div>
@@ -1984,6 +2016,32 @@ export function InventoryPage({
                   placeholder="Select brand"
                   onChange={(brand) => setAddItemForm({ ...addItemForm, brand })}
                 />
+              </div>
+              <div className="rounded-md border border-blue-100 bg-blue-50/70 p-3 lg:col-span-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">POS drawer preview</p>
+                    <p className="mt-1 text-xs text-gray-600">POS groups by Product Family, then filters by Brand, Type / Color / Flavor, and Pack / Size.</p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-4 lg:min-w-[620px]">
+                    <div className="rounded border border-blue-100 bg-white px-3 py-2">
+                      <span className="block text-gray-500">Grid Card</span>
+                      <strong className="block truncate text-gray-900">{posProductGroup}</strong>
+                    </div>
+                    <div className="rounded border border-blue-100 bg-white px-3 py-2">
+                      <span className="block text-gray-500">Brand</span>
+                      <strong className="block truncate text-gray-900">{addItemForm.brand || 'Brand'}</strong>
+                    </div>
+                    <div className="rounded border border-blue-100 bg-white px-3 py-2">
+                      <span className="block text-gray-500">Type / Color</span>
+                      <strong className="block truncate text-gray-900">{posVariation}</strong>
+                    </div>
+                    <div className="rounded border border-blue-100 bg-white px-3 py-2">
+                      <span className="block text-gray-500">Pack / Size</span>
+                      <strong className="block truncate text-gray-900">{posPackSize}</strong>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Unit <span className="text-red-500">*</span></label>
@@ -2312,11 +2370,13 @@ export function InventoryPage({
                 More Filters
               </Button>
               <div className="flex rounded-md border border-gray-200 bg-gray-100 p-1">
-                <Button type="button" variant={tableView === 'grid' ? 'default' : 'ghost'} size="sm" className="h-8 w-8 p-0" onClick={() => setTableView('grid')}>
+                <Button type="button" variant={tableView === 'grid' ? 'default' : 'ghost'} size="sm" className="h-8 gap-1 px-2" onClick={() => setTableView('grid')} title="Grid view" aria-label="Grid view">
                   <Grid3X3 className="h-4 w-4" />
+                  <span className="hidden text-xs xl:inline">Grid</span>
                 </Button>
-                <Button type="button" variant={tableView === 'table' ? 'default' : 'ghost'} size="sm" className="h-8 w-8 p-0" onClick={() => setTableView('table')}>
+                <Button type="button" variant={tableView === 'table' ? 'default' : 'ghost'} size="sm" className="h-8 gap-1 px-2" onClick={() => setTableView('table')} title="Table view" aria-label="Table view">
                   <List className="h-4 w-4" />
+                  <span className="hidden text-xs xl:inline">Table</span>
                 </Button>
               </div>
             </div>
@@ -2513,38 +2573,58 @@ export function InventoryPage({
         </CardHeader>
         <CardContent className="p-0">
           {tableView === 'grid' ? (
-            <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredInventory.map(item => (
-                <div
-                  key={item.id}
-                  className="rounded-md border border-gray-200 bg-white p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
-                >
-                  <div className="flex items-start gap-3">
-                    <ImageWithFallback src={item.image} alt={item.name} className="h-12 w-12 rounded-md object-cover" />
-                    <div className="min-w-0 flex-1">
-                      <button type="button" className="truncate text-left font-semibold text-gray-900" onClick={() => setSelectedProductId(item.id)}>{item.name}</button>
-                      <p className="text-xs text-gray-500">{item.sku} | {item.supplierName}</p>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <Badge className={statusClassName(item.status)}>{item.status}</Badge>
-                        <span className={item.current <= item.reorderLevel ? 'text-sm font-semibold text-red-600' : 'text-sm font-semibold text-green-700'}>{item.current} {item.uom}</span>
+            filteredInventory.length === 0 ? (
+              <div className="flex h-32 items-center justify-center p-4 text-sm text-gray-500">No products match the selected filters.</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+                {filteredInventory.map(item => (
+                  <div
+                    key={item.id}
+                    className="rounded-md border border-gray-200 bg-white p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
+                  >
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedInventoryIds.includes(item.id)}
+                        onChange={() => toggleInventorySelection(item.id)}
+                        aria-label={`Select ${item.name}`}
+                      />
+                      <ImageWithFallback src={item.image} alt={item.name} className="h-12 w-12 rounded-md object-cover" />
+                      <div className="min-w-0 flex-1">
+                        <button type="button" className="block max-w-full truncate text-left font-semibold text-gray-900" onClick={() => setSelectedProductId(item.id)}>{item.name}</button>
+                        <p className="truncate text-xs text-gray-500">{item.sku} | {item.supplierName}</p>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <Badge className={statusClassName(item.status)}>{item.status}</Badge>
+                          <span className={item.current <= item.reorderLevel ? 'text-sm font-semibold text-red-600' : 'text-sm font-semibold text-green-700'}>{item.current} {item.uom}</span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600">
+                          <span>Cost {formatCurrency(item.buyingPrice)}</span>
+                          <span className="text-right">Value {formatCurrency(item.inventoryValue)}</span>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button type="button" variant="outline" size="sm" onClick={() => setSelectedProductId(item.id)}>
+                            <Eye className="mr-2 h-4 w-4" />
+                            View
+                          </Button>
+                          {item.current <= item.reorderLevel && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
+                              disabled={!canCreateReorder(item)}
+                              onClick={() => onReorderOutOfStock([item.id])}
+                            >
+                              <ShoppingBag className="mr-2 h-4 w-4" />
+                              {item.reserved > 0 ? 'PO Pending' : 'Reorder'}
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      {item.current <= item.reorderLevel && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="mt-3 bg-red-600 text-white hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-500"
-                          disabled={!canCreateReorder(item)}
-                          onClick={() => onReorderOutOfStock([item.id])}
-                        >
-                          <ShoppingBag className="mr-2 h-4 w-4" />
-                          {item.reserved > 0 ? 'PO Pending' : 'Reorder'}
-                        </Button>
-                      )}
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           ) : (
             <div className="overflow-x-auto">
               <Table>

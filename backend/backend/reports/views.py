@@ -7,11 +7,56 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import models
 from django.db.models import Sum, Count
+from django.http import HttpResponse
+from django.utils.text import slugify
 from django.utils import timezone
 from decimal import Decimal
 
 from .models import SavedReport, ReportExport
 from .serializers import SavedReportSerializer, ReportExportSerializer
+
+
+def _escape_pdf_text(value):
+    return str(value).replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+
+def _build_simple_pdf(title, company_name, summary):
+    lines = [title, company_name, f"Generated: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}", ""]
+    lines.extend([f"{key}: {value}" for key, value in summary.items()])
+
+    content_lines = ["BT", "/F1 16 Tf", "72 770 Td", f"({_escape_pdf_text(lines[0])}) Tj"]
+    content_lines.extend(["/F1 10 Tf", "0 -24 Td"])
+    for line in lines[1:]:
+        content_lines.append(f"({_escape_pdf_text(line)}) Tj")
+        content_lines.append("0 -16 Td")
+    content_lines.append("ET")
+    stream = "\n".join(content_lines).encode("latin-1", errors="replace")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(pdf)
 
 
 class ReportViewSet(viewsets.GenericViewSet):
@@ -108,6 +153,40 @@ class ReportViewSet(viewsets.GenericViewSet):
             'message': f'Report {report_type} generated',
             'data': {'sample': 'data'}
         })
+
+    @action(detail=False, methods=['post'], url_path='export')
+    def export_report(self, request):
+        """Export a report as a downloadable PDF."""
+        file_format = request.data.get('format', 'pdf')
+        if file_format != 'pdf':
+            return Response(
+                {'detail': 'Only PDF export is currently supported.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        title = request.data.get('title') or 'Business Report'
+        company_name = request.data.get('company_name') or 'POS Admin Dashboard'
+        summary = request.data.get('summary') or {}
+        rows = request.data.get('rows') or []
+
+        data = {'summary': summary}
+        if rows:
+            data['summary'].update({
+                str(row.get('metric', 'Metric')): str(row.get('value', ''))
+                for row in rows
+                if isinstance(row, dict)
+            })
+
+        try:
+            from .report_service import ReportService
+            pdf_bytes = ReportService.generate_pdf_report(data, title, company_name).getvalue()
+        except ModuleNotFoundError:
+            pdf_bytes = _build_simple_pdf(title, company_name, data['summary'])
+
+        filename = f"{slugify(title) or 'report'}.pdf"
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
 
 
 class SavedReportViewSet(viewsets.ModelViewSet):
