@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, CheckCircle, Clock, PackageCheck, ReceiptText, TriangleAlert } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
@@ -18,18 +18,11 @@ type LocalNotificationPayload = Partial<BackendNotification> & {
 
 const LOCAL_NOTIFICATION_STORAGE_KEY = 'pos-local-notifications';
 
-const getNotificationIcon = (notification: BackendNotification) => {
-  if (notification.severity === 'warning') return TriangleAlert;
-  if (notification.severity === 'success') return CheckCircle;
-  if (notification.channel === 'inventory') return PackageCheck;
-  return ReceiptText;
-};
-
-const getIconClassName = (notification: BackendNotification) => {
-  if (notification.severity === 'warning') return 'text-orange-600 bg-orange-50';
-  if (notification.severity === 'error') return 'text-red-600 bg-red-50';
-  if (notification.severity === 'success') return 'text-green-600 bg-green-50';
-  return 'text-blue-600 bg-blue-50';
+const getStatusClassName = (notification: BackendNotification) => {
+  if (notification.severity === 'warning') return 'bg-orange-500';
+  if (notification.severity === 'error') return 'bg-red-500';
+  if (notification.severity === 'success') return 'bg-green-500';
+  return 'bg-blue-500';
 };
 
 const formatRelativeTime = (dateText: string) => {
@@ -279,8 +272,7 @@ export function TopHeader() {
       <div />
 
       <div className="flex min-w-0 flex-1 items-center justify-end gap-2 sm:gap-6">
-        <div className="hidden items-center gap-2 text-gray-700 sm:flex">
-          <Clock className="w-4 h-4" />
+        <div className="hidden text-right text-gray-700 sm:block">
           <div className="text-sm">
             <div className="font-semibold text-base">{formatTime(currentTime)}</div>
             <div className="text-xs text-gray-500">{formatDate(currentTime)}</div>
@@ -332,8 +324,6 @@ export function TopHeader() {
             <div className="max-h-[min(70vh,32rem)] overflow-y-auto">
               {notificationCount > 0 ? (
                 notifications.map((notification) => {
-                  const NotificationIcon = getNotificationIcon(notification);
-
                   return (
                     <button
                       key={notification.id}
@@ -341,9 +331,7 @@ export function TopHeader() {
                       onClick={() => handleMarkRead(notification.id)}
                       className="flex w-full gap-3 border-b border-gray-100 px-3 py-3 text-left last:border-b-0 hover:bg-gray-50 sm:px-4"
                     >
-                      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${getIconClassName(notification)}`}>
-                        <NotificationIcon className="w-4 h-4" />
-                      </div>
+                      <span className={`mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full ${getStatusClassName(notification)}`} />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                           <p className="break-words text-sm font-medium text-gray-900">{notification.title}</p>
@@ -356,9 +344,6 @@ export function TopHeader() {
                 })
               ) : (
                 <div className="px-4 py-8 text-center">
-                  <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100">
-                    <Bell className="w-5 h-5 text-gray-400" />
-                  </div>
                   <p className="text-sm font-medium text-gray-900">{t("You're all caught up")}</p>
                   <p className="mt-1 text-xs text-gray-500">{t('New backend updates will appear here automatically.')}</p>
                 </div>

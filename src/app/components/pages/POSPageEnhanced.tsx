@@ -41,6 +41,7 @@ export interface POSProduct {
   id: string;
   name: string;
   sku: string;
+  barcode?: string;
   category: string;
   brand?: string;
   parentProduct?: string;
@@ -179,6 +180,7 @@ export interface CompletedSaleItem {
   stockUnits: number;
   price: number;
   total: number;
+  tax?: number;
 }
 
 export interface CompletedSale {
@@ -257,6 +259,7 @@ export function POSPage({
     taxLabel: '0%'
   });
   const [cashTendered, setCashTendered] = useState('');
+  const [cashTenderedError, setCashTenderedError] = useState('');
   const appSettings = getStoredAppSettings();
   const isScannerEnabled = appSettings.posSettings.scannerEnabled;
 
@@ -610,6 +613,7 @@ export function POSPage({
       quantity: item.quantity,
       stockUnits: item.stockUnits,
       price: item.price,
+      tax: item.tax,
       total: item.price * item.quantity
     }));
 
@@ -650,16 +654,16 @@ export function POSPage({
   };
 
   const handleCashPayment = () => {
-    if (!cashTendered || parseFloat(cashTendered) < total) {
-      toast.error('Insufficient cash', {
-        description: 'The tendered cash is less than the sale total.'
-      });
+    const tenderedAmount = parseFloat(cashTendered || '0');
+    if (!cashTendered || tenderedAmount < total) {
+      setCashTenderedError(`Cash is short by ${formatCurrency(total - tenderedAmount)}.`);
       return;
     }
+    setCashTenderedError('');
 
     const payments: PaymentTransaction[] = [{
       method: 'cash',
-      amount: parseFloat(cashTendered),
+      amount: tenderedAmount,
       timestamp: new Date()
     }];
 
@@ -1096,12 +1100,24 @@ export function POSPage({
                     <Input
                       type="number"
                       value={cashTendered}
-                      onChange={(e) => setCashTendered(e.target.value)}
-                    className="pl-12 bg-white border-gray-300"
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        setCashTendered(nextValue);
+                        if (parseFloat(nextValue || '0') >= total) {
+                          setCashTenderedError('');
+                        }
+                      }}
+                      className={`pl-12 bg-white ${cashTenderedError ? 'border-red-300 focus-visible:ring-red-300' : 'border-gray-300'}`}
                       placeholder="0.00"
                       step="0.01"
                     />
                   </div>
+                  {cashTenderedError && (
+                    <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      <p className="font-medium">Insufficient cash</p>
+                      <p>{cashTenderedError}</p>
+                    </div>
+                  )}
                 </div>
 
                 {change > 0 && (

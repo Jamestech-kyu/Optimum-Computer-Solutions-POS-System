@@ -10,6 +10,7 @@ import { Plus, Search, Edit, Trash2, TrendingUp, BarChart3 } from 'lucide-react'
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import type { POSProduct } from './POSPageEnhanced';
 import { toast } from 'sonner';
+import { formatCurrency } from '../utils/helpers';
 
 export type UnitOfMeasurement = 'pcs' | 'kg' | 'liter' | 'meter' | 'dozen' | 'box' | 'pack' | 'carton';
 export type PricingTier = 'retail' | 'wholesale' | 'corporate' | 'loyal';
@@ -112,6 +113,7 @@ export function ProductsPageEnhanced({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [selectedStockProduct, setSelectedStockProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState<Partial<Product>>({});
   const [imageError, setImageError] = useState('');
@@ -282,7 +284,7 @@ export function ProductsPageEnhanced({
         <Card className="border-gray-200">
           <CardContent className="pt-6">
             <p className="text-sm text-gray-600 mb-2">Total Stock Value</p>
-            <p className="text-3xl font-bold text-gray-900">KSh {totalInventoryValue.toFixed(2)}</p>
+            <p className="text-3xl font-bold text-gray-900">{formatCurrency(totalInventoryValue)}</p>
           </CardContent>
         </Card>
         <Card className="border-gray-200">
@@ -670,7 +672,7 @@ export function ProductsPageEnhanced({
               </TableHeader>
               <TableBody>
                 {filteredProducts.map(product => (
-                  <TableRow key={product.id}>
+                  <TableRow key={product.id} className="cursor-pointer" onClick={() => setSelectedStockProduct(product)}>
                     <TableCell>
                       <ImageWithFallback
                         src={product.image}
@@ -691,8 +693,8 @@ export function ProductsPageEnhanced({
                       {product.modelNumber && <div className="text-xs text-gray-500">Model: {product.modelNumber}</div>}
                     </TableCell>
                     <TableCell className="text-center">{product.uom.toUpperCase()}</TableCell>
-                    <TableCell>KSh {product.buyingPrice.toFixed(2)}</TableCell>
-                    <TableCell>KSh {product.prices.retail.toFixed(2)}</TableCell>
+                    <TableCell>{formatCurrency(product.buyingPrice)}</TableCell>
+                    <TableCell>{formatCurrency(product.prices.retail)}</TableCell>
                     <TableCell>
                       <Badge className={`${
                         product.profitMargin > 50 ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
@@ -711,14 +713,20 @@ export function ProductsPageEnhanced({
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleOpenDialog(product)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenDialog(product);
+                            }}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => handleDelete(product.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleDelete(product.id);
+                            }}
                           >
                             <Trash2 className="w-4 h-4 text-red-600" />
                           </Button>
@@ -732,6 +740,49 @@ export function ProductsPageEnhanced({
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!selectedStockProduct} onOpenChange={(open) => !open && setSelectedStockProduct(null)}>
+        <DialogContent className="bg-white border-gray-200 max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Stock Level Details</DialogTitle>
+          </DialogHeader>
+          {selectedStockProduct && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 rounded-md border border-gray-200 p-3">
+                <ImageWithFallback
+                  src={selectedStockProduct.image}
+                  alt={selectedStockProduct.name}
+                  className="h-16 w-16 rounded-md border border-gray-200 object-cover"
+                />
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-900">{selectedStockProduct.name}</p>
+                  <p className="text-sm text-gray-500">{selectedStockProduct.sku} | {selectedStockProduct.category}</p>
+                  <p className="text-sm text-gray-500">{selectedStockProduct.supplierName || 'No supplier linked'}</p>
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">Current Stock</p>
+                  <p className="text-xl font-semibold text-gray-900">{selectedStockProduct.stock} {selectedStockProduct.uom}</p>
+                </div>
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">Reorder Level</p>
+                  <p className="text-xl font-semibold text-gray-900">{selectedStockProduct.reorderLevel}</p>
+                </div>
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">Buying Price</p>
+                  <p className="font-semibold text-gray-900">{formatCurrency(selectedStockProduct.buyingPrice)}</p>
+                </div>
+                <div className="rounded-md bg-gray-50 p-3">
+                  <p className="text-xs text-gray-500">Retail Price</p>
+                  <p className="font-semibold text-gray-900">{formatCurrency(selectedStockProduct.prices.retail)}</p>
+                </div>
+              </div>
+              <Button className="w-full" onClick={() => setSelectedStockProduct(null)}>Close</Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

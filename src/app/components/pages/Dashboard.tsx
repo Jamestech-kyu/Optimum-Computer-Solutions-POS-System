@@ -7,7 +7,6 @@ import type { CompletedSale, DayBalance, POSProduct } from './POSPageEnhanced';
 import type { UserRole } from '../../types/auth';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
 import { Badge } from '../ui/badge';
-import { AlertTriangle, CheckCircle2, ReceiptText, WalletCards } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
 
 interface DashboardProps {
@@ -48,11 +47,6 @@ export function Dashboard({ products, completedSales, dayBalance, cashSalesToday
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
         <Alert className={lowStockItems.length > 0 ? 'border-orange-200 bg-orange-50' : 'border-green-200 bg-green-50'}>
-          {lowStockItems.length > 0 ? (
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-          )}
           <AlertTitle className={lowStockItems.length > 0 ? 'text-orange-900' : 'text-green-900'}>
             Stock Watch
           </AlertTitle>
@@ -64,7 +58,6 @@ export function Dashboard({ products, completedSales, dayBalance, cashSalesToday
         </Alert>
 
         <Alert className={cashVariance < 0 ? 'border-red-200 bg-red-50' : 'border-blue-200 bg-blue-50'}>
-          <WalletCards className={cashVariance < 0 ? 'h-4 w-4 text-red-600' : 'h-4 w-4 text-blue-600'} />
           <AlertTitle className={cashVariance < 0 ? 'text-red-900' : 'text-blue-900'}>
             Cash Position
           </AlertTitle>
@@ -76,7 +69,6 @@ export function Dashboard({ products, completedSales, dayBalance, cashSalesToday
         </Alert>
 
         <Alert className={hasCriticalAlerts ? 'border-slate-200 bg-white' : 'border-green-200 bg-green-50'}>
-          <ReceiptText className={hasCriticalAlerts ? 'h-4 w-4 text-slate-600' : 'h-4 w-4 text-green-600'} />
           <AlertTitle className={hasCriticalAlerts ? 'text-slate-900' : 'text-green-900'}>
             Today
           </AlertTitle>

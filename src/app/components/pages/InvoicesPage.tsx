@@ -6,9 +6,17 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
-import { Search, Eye, Download, Send, Plus, FileText } from 'lucide-react';
+import { Search, Eye, Download, Send, Plus, FileText, CreditCard } from 'lucide-react';
 import { SupplierOrderInvoice } from '../../types/supplierOrder';
 import type { CompletedSale } from './POSPageEnhanced';
+import { formatCurrency } from '../utils/helpers';
+
+type SupplierPaymentInput = {
+  amount: number;
+  method: string;
+  reference?: string;
+  notes?: string;
+};
 
 interface InvoicesPageProps {
   supplierInvoices: SupplierOrderInvoice[];
@@ -16,6 +24,7 @@ interface InvoicesPageProps {
   openNewInvoiceSignal?: number;
   onStartSale?: () => void;
   onRecordSupplierOrder?: () => void;
+  onPaySupplierInvoice?: (invoice: SupplierOrderInvoice, payment: SupplierPaymentInput) => Promise<void> | void;
 }
 
 interface InvoiceLineItem {
@@ -35,6 +44,7 @@ interface InvoiceRow {
   paymentMethod: string;
   type: 'Supplier' | 'Customer';
   lineItems: InvoiceLineItem[];
+  sourceInvoice?: SupplierOrderInvoice;
 }
 
 export function InvoicesPage({
@@ -42,13 +52,21 @@ export function InvoicesPage({
   completedSales,
   openNewInvoiceSignal = 0,
   onStartSale,
-  onRecordSupplierOrder
+  onRecordSupplierOrder,
+  onPaySupplierInvoice
 }: InvoicesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
   const [isNewInvoiceDialogOpen, setIsNewInvoiceDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRow | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<InvoiceRow | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [paymentNotes, setPaymentNotes] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
 
   useEffect(() => {
     if (openNewInvoiceSignal > 0) {
@@ -66,6 +84,7 @@ export function InvoicesPage({
       items: invoice.items,
       paymentMethod: invoice.paymentMethod,
       type: 'Supplier' as const,
+      sourceInvoice: invoice,
       lineItems: (invoice.orderItems || []).map(item => ({
         name: item.productName,
         quantity: item.requestedQuantity,
@@ -98,6 +117,70 @@ export function InvoicesPage({
     return matchesSearch && matchesStatus;
   });
 
+  const normalizePaymentStatus = (invoice: InvoiceRow) => (
+    invoice.sourceInvoice?.paymentStatus || invoice.paymentMethod || 'unpaid'
+  ).toLowerCase();
+
+  const getPaidAmount = (invoice: InvoiceRow) => {
+    if (typeof invoice.sourceInvoice?.paidAmount === 'number') {
+      return Math.min(invoice.amount, Math.max(0, invoice.sourceInvoice.paidAmount));
+    }
+    return normalizePaymentStatus(invoice) === 'paid' ? invoice.amount : 0;
+  };
+  const getPaymentBalance = (invoice: InvoiceRow) => Math.max(0, invoice.amount - getPaidAmount(invoice));
+  const hasReceivedGoods = (invoice: InvoiceRow) => {
+    if (invoice.type !== 'Supplier' || !invoice.sourceInvoice) return false;
+    return invoice.status === 'delivered'
+      || (invoice.sourceInvoice.quantityDelivered || 0) > 0
+      || (invoice.sourceInvoice.orderItems || []).some(item => item.deliveredQuantity > 0);
+  };
+  const canPaySupplier = (invoice: InvoiceRow) => (
+    invoice.type === 'Supplier'
+    && Boolean(invoice.sourceInvoice)
+    && hasReceivedGoods(invoice)
+    && normalizePaymentStatus(invoice) !== 'paid'
+  );
+
+  const openSupplierPayment = (invoice: InvoiceRow) => {
+    setPaymentInvoice(invoice);
+    setPaymentAmount(String(getPaymentBalance(invoice) || invoice.amount));
+    setPaymentMethod(invoice.sourceInvoice?.supplierPaymentMethod || 'Cash');
+    setPaymentReference(invoice.sourceInvoice?.paymentReference || '');
+    setPaymentNotes(invoice.sourceInvoice?.paymentNotes || '');
+    setPaymentError('');
+  };
+
+  const recordSupplierPayment = async () => {
+    if (!paymentInvoice?.sourceInvoice || !onPaySupplierInvoice) return;
+
+    const amount = Number(paymentAmount);
+    const balance = getPaymentBalance(paymentInvoice);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError('Enter a payment amount greater than zero.');
+      return;
+    }
+    if (amount > balance) {
+      setPaymentError(`Payment cannot exceed the balance of ${formatCurrency(balance)}.`);
+      return;
+    }
+
+    setIsRecordingPayment(true);
+    setPaymentError('');
+    try {
+      await onPaySupplierInvoice(paymentInvoice.sourceInvoice, {
+        amount,
+        method: paymentMethod,
+        reference: paymentReference.trim() || undefined,
+        notes: paymentNotes.trim() || undefined
+      });
+      setPaymentInvoice(null);
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : 'Supplier payment could not be recorded.');
+    } finally {
+      setIsRecordingPayment(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'paid':
@@ -115,13 +198,19 @@ export function InvoicesPage({
     }
   };
 
-  const getPaymentMethodBadge = (method: string) => {
-    const colors = {
-      'Card': 'bg-blue-500/20 text-blue-600',
-      'Cash': 'bg-green-500/20 text-green-600',
-      'Digital': 'bg-purple-500/20 text-purple-600'
+  const getPaymentBadge = (invoice: InvoiceRow) => {
+    const status = normalizePaymentStatus(invoice);
+    const labels: Record<string, string> = {
+      unpaid: 'Unpaid',
+      partial: 'Partial',
+      paid: 'Paid'
     };
-    return <Badge className={colors[method as keyof typeof colors] || 'bg-gray-500/20 text-gray-500'}>{method}</Badge>;
+    const colors: Record<string, string> = {
+      unpaid: 'bg-gray-500/20 text-gray-600',
+      partial: 'bg-orange-500/20 text-orange-600',
+      paid: 'bg-green-500/20 text-green-600'
+    };
+    return <Badge className={colors[status] || 'bg-gray-500/20 text-gray-500'}>{labels[status] || invoice.paymentMethod}</Badge>;
   };
 
   return (
@@ -195,7 +284,7 @@ export function InvoicesPage({
               <div>
                 <p className="text-gray-500 text-sm">Total Amount</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  KSh {allInvoices.reduce((sum, inv) => sum + inv.amount, 0).toFixed(0)}
+                  {formatCurrency(allInvoices.reduce((sum, inv) => sum + inv.amount, 0))}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -290,6 +379,8 @@ export function InvoicesPage({
                 <TableHead className="text-gray-600">Type</TableHead>
                 <TableHead className="text-gray-600">Date</TableHead>
                 <TableHead className="text-gray-600">Amount</TableHead>
+                <TableHead className="text-gray-600">Paid</TableHead>
+                <TableHead className="text-gray-600">Balance</TableHead>
                 <TableHead className="text-gray-600">Items</TableHead>
                 <TableHead className="text-gray-600">Payment</TableHead>
                 <TableHead className="text-gray-600">Status</TableHead>
@@ -312,9 +403,15 @@ export function InvoicesPage({
                     </Badge>
                   </TableCell>
                   <TableCell className="text-gray-600">{invoice.date}</TableCell>
-                  <TableCell className="text-green-600">KSh {invoice.amount.toFixed(2)}</TableCell>
+                  <TableCell className="text-green-600">{formatCurrency(invoice.amount)}</TableCell>
+                  <TableCell className={invoice.type === 'Supplier' ? 'text-blue-700' : 'text-gray-600'}>
+                    {invoice.type === 'Supplier' ? formatCurrency(getPaidAmount(invoice)) : formatCurrency(invoice.amount)}
+                  </TableCell>
+                  <TableCell className={invoice.type === 'Supplier' && getPaymentBalance(invoice) > 0 ? 'font-medium text-orange-600' : 'text-gray-600'}>
+                    {invoice.type === 'Supplier' ? formatCurrency(getPaymentBalance(invoice)) : formatCurrency(0)}
+                  </TableCell>
                   <TableCell className="text-gray-600">{invoice.items} items</TableCell>
-                  <TableCell>{getPaymentMethodBadge(invoice.paymentMethod)}</TableCell>
+                  <TableCell>{getPaymentBadge(invoice)}</TableCell>
                   <TableCell>{getStatusBadge(invoice.status)}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
@@ -324,8 +421,15 @@ export function InvoicesPage({
                       <Button size="sm" variant="ghost" className="text-green-600 hover:text-green-300">
                         <Download className="w-4 h-4" />
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-purple-600 hover:text-purple-300">
-                        <Send className="w-4 h-4" />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className={canPaySupplier(invoice) ? 'text-purple-600 hover:text-purple-300' : 'text-gray-400 hover:text-gray-500'}
+                        onClick={() => canPaySupplier(invoice) ? openSupplierPayment(invoice) : undefined}
+                        disabled={invoice.type === 'Supplier' && !canPaySupplier(invoice)}
+                        title={invoice.type === 'Supplier' ? 'Pay supplier' : 'Send invoice'}
+                      >
+                        {invoice.type === 'Supplier' ? <CreditCard className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                       </Button>
                     </div>
                   </TableCell>
@@ -353,7 +457,7 @@ export function InvoicesPage({
                   )}
                 </div>
                 <div className="sm:text-right">
-                  <p className="text-2xl font-semibold text-green-700">KSh {selectedInvoice.amount.toFixed(2)}</p>
+                  <p className="text-2xl font-semibold text-green-700">{formatCurrency(selectedInvoice.amount)}</p>
                   <div className="mt-2 flex gap-2 sm:justify-end">
                     <Badge className={selectedInvoice.type === 'Supplier' ? 'bg-orange-500/20 text-orange-600' : 'bg-blue-500/20 text-blue-600'}>
                       {selectedInvoice.type}
@@ -363,14 +467,26 @@ export function InvoicesPage({
                 </div>
               </div>
 
-              <div className="grid gap-3 text-sm sm:grid-cols-3">
+              <div className="grid gap-3 text-sm sm:grid-cols-4">
                 <div>
                   <p className="text-gray-500">Date</p>
                   <p className="font-medium text-gray-900">{selectedInvoice.date}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Payment</p>
-                  <div className="mt-1">{getPaymentMethodBadge(selectedInvoice.paymentMethod)}</div>
+                  <div className="mt-1">{getPaymentBadge(selectedInvoice)}</div>
+                </div>
+                <div>
+                  <p className="text-gray-500">Paid</p>
+                  <p className="font-medium text-blue-700">
+                    {selectedInvoice.type === 'Supplier' ? formatCurrency(getPaidAmount(selectedInvoice)) : formatCurrency(selectedInvoice.amount)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Balance</p>
+                  <p className={selectedInvoice.type === 'Supplier' && getPaymentBalance(selectedInvoice) > 0 ? 'font-medium text-orange-600' : 'font-medium text-gray-900'}>
+                    {selectedInvoice.type === 'Supplier' ? formatCurrency(getPaymentBalance(selectedInvoice)) : formatCurrency(0)}
+                  </p>
                 </div>
                 <div>
                   <p className="text-gray-500">Items</p>
@@ -388,7 +504,7 @@ export function InvoicesPage({
                       <div key={`${item.name}-${index}`} className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-gray-200 px-3 py-2 text-sm last:border-b-0">
                         <p className="font-medium text-gray-900">{item.name}</p>
                         <p className="text-gray-600">Qty {item.quantity}</p>
-                        <p className="font-semibold text-green-700">KSh {item.total.toFixed(2)}</p>
+                        <p className="font-semibold text-green-700">{formatCurrency(item.total)}</p>
                       </div>
                     ))}
                   </div>
@@ -396,6 +512,97 @@ export function InvoicesPage({
               </div>
 
               <Button className="w-full" onClick={() => setSelectedInvoice(null)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {paymentInvoice && (
+        <Dialog open={!!paymentInvoice} onOpenChange={() => setPaymentInvoice(null)}>
+          <DialogContent className="bg-white border-gray-200 max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900">Pay Supplier</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+                <p className="text-sm text-gray-500">{paymentInvoice.id}</p>
+                <p className="font-semibold text-gray-900">{paymentInvoice.customer}</p>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <p className="text-gray-500">Invoice Total</p>
+                    <p className="font-semibold">{formatCurrency(paymentInvoice.amount)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Already Paid</p>
+                    <p className="font-semibold text-blue-700">{formatCurrency(getPaidAmount(paymentInvoice))}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-500">Balance</p>
+                    <p className="font-semibold text-orange-600">{formatCurrency(getPaymentBalance(paymentInvoice))}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium text-gray-700">Amount to pay</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={paymentAmount}
+                  onChange={(event) => setPaymentAmount(event.target.value)}
+                  className="bg-gray-100 border-gray-200 text-gray-900"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium text-gray-700">Payment method</label>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger className="bg-gray-100 border-gray-200 text-gray-900">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-gray-100 border-gray-200">
+                    <SelectItem value="Cash">Cash</SelectItem>
+                    <SelectItem value="M-Pesa">M-Pesa</SelectItem>
+                    <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                    <SelectItem value="Card">Card</SelectItem>
+                    <SelectItem value="Credit">Credit</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium text-gray-700">Reference</label>
+                <Input
+                  value={paymentReference}
+                  onChange={(event) => setPaymentReference(event.target.value)}
+                  placeholder="Receipt, transaction, cheque or bank ref"
+                  className="bg-gray-100 border-gray-200 text-gray-900"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <label className="text-sm font-medium text-gray-700">Notes</label>
+                <Input
+                  value={paymentNotes}
+                  onChange={(event) => setPaymentNotes(event.target.value)}
+                  placeholder="Optional payment notes"
+                  className="bg-gray-100 border-gray-200 text-gray-900"
+                />
+              </div>
+
+              {paymentError && (
+                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{paymentError}</p>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <Button variant="outline" onClick={() => setPaymentInvoice(null)} disabled={isRecordingPayment}>
+                  Cancel
+                </Button>
+                <Button className="bg-green-600 text-white hover:bg-green-700" onClick={recordSupplierPayment} disabled={isRecordingPayment}>
+                  {isRecordingPayment ? 'Recording...' : 'Record Payment'}
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>

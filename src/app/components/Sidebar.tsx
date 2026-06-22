@@ -1,18 +1,4 @@
-import React, { useState } from 'react';
-import {
-  Home,
-  ShoppingCart,
-  FileText,
-  Users,
-  Package,
-  Truck,
-  BarChart3,
-  CreditCard,
-  TrendingUp,
-  UserCheck,
-  Settings,
-  LogOut,
-} from 'lucide-react';
+import React, { useMemo, useState } from 'react';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { UserRole } from '../types/auth';
@@ -20,18 +6,18 @@ import { useAppLanguage } from '../services/language';
 import { canAccessModule, roleLabel, type AppModuleId } from '../services/permissions';
 
 const allMenuItems = [
-  { icon: Home, label: 'Dashboard', id: 'dashboard' },
-  { icon: ShoppingCart, label: 'POS / Sales', id: 'pos' },
-  { icon: FileText, label: 'Invoices', id: 'invoices' },
-  { icon: Users, label: 'Customers', id: 'customers' },
-  { icon: Package, label: 'Stock levels', id: 'products' },
-  { icon: Truck, label: 'Procurement', id: 'procurement' },
-  { icon: BarChart3, label: 'Inventory', id: 'inventory' },
-  { icon: CreditCard, label: 'Expenses', id: 'expenses' },
-  { icon: TrendingUp, label: 'Reports', id: 'reports' },
-  { icon: UserCheck, label: 'Users / Staff', id: 'users' },
-  { icon: Settings, label: 'Settings', id: 'settings' }
-] satisfies Array<{ icon: typeof Home; label: string; id: AppModuleId }>;
+  { label: 'Dashboard', id: 'dashboard' },
+  { label: 'POS / Sales', id: 'pos' },
+  { label: 'Invoices', id: 'invoices' },
+  { label: 'Customers', id: 'customers' },
+  { label: 'Stock levels', id: 'products' },
+  { label: 'Procurement', id: 'procurement' },
+  { label: 'Inventory', id: 'inventory' },
+  { label: 'Expenses', id: 'expenses' },
+  { label: 'Reports', id: 'reports' },
+  { label: 'Users / Staff', id: 'users' },
+  { label: 'Settings', id: 'settings' }
+] satisfies Array<{ label: string; id: AppModuleId }>;
 
 interface SidebarProps {
   activeItem: string;
@@ -44,7 +30,10 @@ interface SidebarProps {
 export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName }: SidebarProps) {
   const { t } = useAppLanguage();
   const [isLogoutConfirmOpen, setIsLogoutConfirmOpen] = useState(false);
-  const filteredMenuItems = allMenuItems.filter(item => canAccessModule(item.id, userRole));
+  const filteredMenuItems = useMemo(
+    () => allMenuItems.filter(item => canAccessModule(item.id, userRole)),
+    [userRole]
+  );
 
   const getRoleBadgeColor = (role: UserRole) => {
     switch(role) {
@@ -69,7 +58,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
   };
 
   return (
-    <div className="sticky top-0 h-screen w-60 shrink-0 overflow-hidden bg-white border-r border-gray-200 flex flex-col shadow-sm">
+    <div className="sticky top-0 h-screen w-60 shrink-0 overflow-hidden border-r border-gray-200 bg-white flex flex-col">
       {/* Logo/Brand */}
       <div className="p-5 border-b border-gray-100">
         <h2 className="text-gray-900 font-semibold text-lg tracking-tight">SALES ENTRY & RECEIPT</h2>
@@ -77,7 +66,7 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
       </div>
 
       {/* User Info */}
-      <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+      <div className="px-5 py-3 border-b border-gray-100 bg-slate-50">
         <p className="text-xs text-gray-500 mb-1">{t('Logged in as')}</p>
         <p className="text-sm font-semibold text-gray-900">{userName}</p>
         <Badge className={`mt-2 ${getRoleBadgeColor(userRole)}`}>
@@ -88,7 +77,6 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
       {/* Navigation Menu */}
       <div className="flex-1 p-3 space-y-0.5 overflow-hidden">
         {filteredMenuItems.map((item) => {
-          const IconComponent = item.icon;
           const isActive = activeItem === item.id;
 
           return (
@@ -98,14 +86,15 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
                 setIsLogoutConfirmOpen(false);
                 onItemClick(item.id);
               }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors text-sm ${
+              aria-current={isActive ? 'page' : undefined}
+              className={`group relative w-full rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
                 isActive
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                  ? 'bg-blue-50 text-blue-700 font-semibold'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               }`}
             >
-              <IconComponent className="w-4 h-4 flex-shrink-0" />
-              <span>{t(item.label)}</span>
+              {isActive && <span className="absolute left-0 top-2 bottom-2 w-1 rounded-r bg-blue-600" />}
+              <span className="block truncate pl-2">{t(item.label)}</span>
             </button>
           );
         })}
@@ -144,7 +133,6 @@ export function Sidebar({ activeItem, onItemClick, onLogout, userRole, userName 
           className="w-full justify-start text-gray-500 hover:text-gray-900 hover:bg-gray-100 text-sm"
           onClick={() => setIsLogoutConfirmOpen(previous => !previous)}
         >
-          <LogOut className="w-4 h-4 mr-3" />
           {t('Logout')}
         </Button>
       </div>

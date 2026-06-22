@@ -118,7 +118,7 @@ type InventoryNotification = {
   time: string;
 };
 
-type AddItemFieldErrors = Partial<Record<'sku' | 'barcode' | 'name' | 'category' | 'brand' | 'json', string>>;
+type AddItemFieldErrors = Partial<Record<'sku' | 'barcode' | 'name' | 'category' | 'brand' | 'expiryDate' | 'json', string>>;
 
 type InventoryVariantSeed = {
   family: string;
@@ -134,6 +134,7 @@ type InventoryVariantSeed = {
 };
 
 type DrawerVariantStockMap = Record<string, string>;
+type DrawerVariantValueMap = Record<string, string>;
 
 const unitOptions = ['pcs', 'kg', 'g', 'liter', 'ml', 'meter', 'dozen', 'box', 'pack', 'carton', 'tin', 'bag', 'pair'];
 const quantifiableUnitLabels: Record<string, { singular: string; plural: string }> = {
@@ -766,6 +767,9 @@ const blankAddItemForm = {
   loyalPrice: '',
   stock: '',
   drawerVariantStocks: {} as DrawerVariantStockMap,
+  drawerVariantRetailPrices: {} as DrawerVariantValueMap,
+  drawerVariantCostPrices: {} as DrawerVariantValueMap,
+  drawerVariantWholesalePrices: {} as DrawerVariantValueMap,
   reorderLevel: '',
   maximumStock: '',
   tax: '',
@@ -869,6 +873,7 @@ const getSeededVariants = (category?: string, family?: string) => seededInventor
   .filter(seed => (!category || seed.category === category) && (!family || seed.family === family));
 
 const uniqueSorted = (values: string[]) => Array.from(new Set(values.filter(Boolean))).sort((left, right) => left.localeCompare(right));
+const uniqueInOrder = (values: string[]) => Array.from(new Set(values.filter(Boolean)));
 
 const buildSeedCategoryMap = () => seededInventoryCatalog.reduce((categoryMap, catalog) => {
   catalog.variants.forEach(seed => {
@@ -878,6 +883,45 @@ const buildSeedCategoryMap = () => seededInventoryCatalog.reduce((categoryMap, c
   });
   return categoryMap;
 }, new Map<string, Set<string>>());
+
+const scoreCatalogForText = (catalog: typeof seededInventoryCatalog[number], text: string) => {
+  const normalizedText = normalizeSeedSearch(text);
+  if (normalizedText.length < 2) return 0;
+
+  const searchableValues = [
+    catalog.family,
+    ...catalog.aliases,
+    ...catalog.variants.flatMap(seed => [
+      seed.category,
+      seed.brand,
+      seed.itemType,
+      seed.size,
+      seed.color || '',
+      seed.packSize || '',
+      seed.variation || ''
+    ])
+  ];
+
+  return searchableValues.reduce((score, value) => {
+    const normalizedValue = normalizeSeedSearch(value);
+    if (!normalizedValue) return score;
+    if (normalizedText === normalizedValue) return Math.max(score, 120);
+    if (normalizedText.includes(normalizedValue)) return Math.max(score, normalizedValue === normalizeSeedSearch(catalog.family) ? 100 : 70);
+    if (normalizedValue.includes(normalizedText)) return Math.max(score, normalizedValue === normalizeSeedSearch(catalog.family) ? 95 : 60);
+
+    const textTokens = normalizedText.split(' ').filter(token => token.length > 2);
+    const valueTokens = normalizedValue.split(' ').filter(token => token.length > 2);
+    const overlap = textTokens.filter(token => valueTokens.some(valueToken => valueToken === token || valueToken.includes(token) || token.includes(valueToken))).length;
+    return overlap > 0 ? Math.max(score, 25 + overlap * 10) : score;
+  }, 0);
+};
+
+const getMatchingSeedCatalogs = (text: string, limit = 14) => seededInventoryCatalog
+  .map(catalog => ({ catalog, score: scoreCatalogForText(catalog, text) }))
+  .filter(match => match.score > 0)
+  .sort((left, right) => right.score - left.score || left.catalog.family.localeCompare(right.catalog.family))
+  .slice(0, limit)
+  .map(match => match.catalog);
 
 function SearchableSeedSelect({
   value,
@@ -1022,6 +1066,9 @@ const getAddItemFieldErrors = (message: string): AddItemFieldErrors => {
   if (normalized.includes('brand')) {
     errors.brand = message;
   }
+  if (normalized.includes('expiry')) {
+    errors.expiryDate = message;
+  }
   if (normalized.includes('json') || normalized.includes('parse') || normalized.includes('syntax') || normalized.includes('unexpected token')) {
     errors.json = message;
   }
@@ -1111,6 +1158,8 @@ export function InventoryPage({
   const [selectedReorderItems, setSelectedReorderItems] = useState<string[]>([]);
   const [reorderQuantities, setReorderQuantities] = useState<Record<string, string>>({});
   const [grnReceivedQuantities, setGrnReceivedQuantities] = useState<Record<string, string>>({});
+  const [grnRejectedQuantities, setGrnRejectedQuantities] = useState<Record<string, string>>({});
+  const [grnRejectionReasons, setGrnRejectionReasons] = useState<Record<string, string>>({});
   const [grnDetails, setGrnDetails] = useState({
     goodsReceivingNote: '',
     deliveryNote: '',
@@ -1134,19 +1183,48 @@ export function InventoryPage({
 
   const activeSuppliers = suppliers.filter(supplier => supplier.is_active !== false);
   const seedCategoryMap = useMemo(() => buildSeedCategoryMap(), []);
+  const addItemSeedSearchText = [
+    addItemForm.name,
+    addItemForm.parentProduct,
+    addItemForm.itemType,
+    addItemForm.brand,
+    addItemForm.category
+  ].join(' ');
+  const matchingSeedCatalogs = useMemo(
+    () => getMatchingSeedCatalogs(addItemSeedSearchText),
+    [addItemSeedSearchText]
+  );
   const seededCategoryOptions = useMemo(
-    () => uniqueSorted(Array.from(seedCategoryMap.keys())),
-    [seedCategoryMap]
+    () => uniqueInOrder([
+      ...matchingSeedCatalogs.flatMap(catalog => catalog.variants.map(seed => seed.category)),
+      ...uniqueSorted(Array.from(seedCategoryMap.keys()))
+    ]),
+    [matchingSeedCatalogs, seedCategoryMap]
   );
   const seededSubcategoryOptions = useMemo(
-    () => addItemForm.category
-      ? uniqueSorted(Array.from(seedCategoryMap.get(addItemForm.category) || []))
-      : uniqueSorted(seededInventoryCatalog.map(catalog => catalog.family)),
-    [addItemForm.category, seedCategoryMap]
+    () => {
+      const matchingFamilies = matchingSeedCatalogs
+        .filter(catalog => !addItemForm.category || catalog.variants.some(seed => seed.category === addItemForm.category))
+        .map(catalog => catalog.family);
+      const categoryFamilies = addItemForm.category
+        ? uniqueSorted(Array.from(seedCategoryMap.get(addItemForm.category) || []))
+        : uniqueSorted(seededInventoryCatalog.map(catalog => catalog.family));
+      return uniqueInOrder([...matchingFamilies, ...categoryFamilies]);
+    },
+    [addItemForm.category, matchingSeedCatalogs, seedCategoryMap]
   );
   const seededBrandOptions = useMemo(
-    () => uniqueSorted(getSeededVariants(addItemForm.category, addItemForm.parentProduct).map(seed => seed.brand)),
-    [addItemForm.category, addItemForm.parentProduct]
+    () => {
+      const matchingBrands = matchingSeedCatalogs
+        .flatMap(catalog => catalog.variants)
+        .filter(seed => (!addItemForm.category || seed.category === addItemForm.category) && (!addItemForm.parentProduct || seed.family === addItemForm.parentProduct))
+        .map(seed => seed.brand);
+      return uniqueInOrder([
+        ...matchingBrands,
+        ...uniqueSorted(getSeededVariants(addItemForm.category, addItemForm.parentProduct).map(seed => seed.brand))
+      ]);
+    },
+    [addItemForm.category, addItemForm.parentProduct, matchingSeedCatalogs]
   );
   const hasQuantityLevels = isQuantifiableUnit(addItemForm.uom);
   const updateAddItemField = <K extends keyof typeof blankAddItemForm>(field: K, value: (typeof blankAddItemForm)[K]) => {
@@ -1155,6 +1233,30 @@ export function InventoryPage({
       setAddItemFieldErrors(previous => {
         const next = { ...previous };
         delete next[field as keyof AddItemFieldErrors];
+        return next;
+      });
+    }
+  };
+
+  const updateAddItemName = (name: string) => {
+    const [bestCatalog] = getMatchingSeedCatalogs(name);
+    const firstVariant = bestCatalog?.variants[0];
+    setAddItemForm(previous => ({
+      ...previous,
+      name,
+      category: previous.category || firstVariant?.category || '',
+      parentProduct: previous.parentProduct || bestCatalog?.family || '',
+      brand: previous.brand || firstVariant?.brand || '',
+      itemType: previous.itemType || firstVariant?.itemType || '',
+      size: previous.size || firstVariant?.size || '',
+      packSize: previous.packSize || firstVariant?.packSize || '',
+      uom: firstVariant && !previous.uom ? firstVariant.uom : previous.uom,
+      reorderLevel: previous.reorderLevel || (firstVariant ? String(firstVariant.reorderLevel) : '')
+    }));
+    if (addItemFieldErrors.name) {
+      setAddItemFieldErrors(previous => {
+        const next = { ...previous };
+        delete next.name;
         return next;
       });
     }
@@ -1305,16 +1407,19 @@ export function InventoryPage({
     }
 
     setGrnReceivedQuantities(pendingGrnRequest.orderItems.reduce<Record<string, string>>((quantities, item) => {
-      quantities[item.productId] = String(item.deliveredQuantity || item.requestedQuantity || 0);
+      const pendingQuantity = item.pendingQuantity ?? Math.max(0, item.requestedQuantity - item.deliveredQuantity);
+      quantities[item.productId] = String(pendingQuantity || 0);
       return quantities;
     }, {}));
+    setGrnRejectedQuantities({});
+    setGrnRejectionReasons({});
     setGrnDetails({
       goodsReceivingNote: pendingGrnRequest.goodsReceivingNote || '',
       deliveryNote: pendingGrnRequest.deliveryNote || '',
       receivingLocation: pendingGrnRequest.receivingLocation || 'Main Store',
       receivingNotes: pendingGrnRequest.receivingNotes || ''
     });
-  }, [pendingGrnRequest?.date, pendingGrnRequest?.supplierId, pendingGrnRequest?.goodsReceivingNote, pendingGrnRequest?.deliveryNote, pendingGrnRequest?.orderItems?.map(item => `${item.productId}:${item.requestedQuantity}`).join('|')]);
+  }, [pendingGrnRequest?.date, pendingGrnRequest?.supplierId, pendingGrnRequest?.goodsReceivingNote, pendingGrnRequest?.deliveryNote, pendingGrnRequest?.orderItems?.map(item => `${item.productId}:${item.requestedQuantity}:${item.deliveredQuantity}:${item.pendingQuantity}`).join('|')]);
 
   useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('pos-inventory-live') : null;
@@ -1336,7 +1441,6 @@ export function InventoryPage({
     const supplierName = product.supplierName || supplierFromProduct?.name || supplierFromInvoices?.supplierName || 'No supplier linked';
     const reorderLevel = product.reorderLevel || getReorderLevel(product);
     const reserved = supplierInvoices
-      .filter(invoice => invoice.status !== 'delivered')
       .reduce((sum, invoice) => {
         const linePending = invoice.orderItems
           ?.filter(item => item.productId === product.id)
@@ -1360,7 +1464,7 @@ export function InventoryPage({
       image: product.image,
       name: product.name,
       sku: product.sku,
-      barcode: product.sku,
+      barcode: product.barcode || product.sku,
       category: product.category,
       supplierId: product.supplierId || supplierFromProduct?.id || supplierFromInvoices?.supplierId,
       supplierName,
@@ -1392,7 +1496,7 @@ export function InventoryPage({
   const todaySalesImpact = todayMovements
     .filter(movement => movementLabel(movement) === 'Sale')
     .reduce((sum, movement) => sum + Math.abs(movement.quantity), 0);
-  const pendingReorders = supplierInvoices.filter(invoice => invoice.status !== 'delivered').length;
+  const pendingReorders = supplierInvoices.filter(invoice => (invoice.quantityPending || invoice.orderItems?.some(item => item.pendingQuantity > 0))).length;
   const totalInventoryValue = inventory.reduce((sum, item) => sum + item.inventoryValue, 0);
 
   useEffect(() => {
@@ -1417,7 +1521,7 @@ export function InventoryPage({
       const nextQuantities = { ...previousQuantities };
       reorderSuggestionItems.forEach(item => {
         if (!nextQuantities[item.id]) {
-          nextQuantities[item.id] = String(Math.max(1, item.reorderLevel * 2 - item.current));
+          nextQuantities[item.id] = String(Math.max(1, item.reorderLevel * 2 - item.current - item.reserved));
         }
       });
       Object.keys(nextQuantities).forEach(productId => {
@@ -1609,7 +1713,7 @@ export function InventoryPage({
     );
   };
   const seedSearch = normalizeSeedSearch(addItemForm.parentProduct);
-  const selectedSeedCatalog = seedSearch.length >= 2
+  const selectedSeedCatalog = (seedSearch.length >= 2
     ? seededInventoryCatalog.find(catalog => {
         const family = normalizeSeedSearch(catalog.family);
         return family.includes(seedSearch)
@@ -1619,10 +1723,12 @@ export function InventoryPage({
             return normalizedAlias.includes(seedSearch) || seedSearch.includes(normalizedAlias);
           });
       })
-    : undefined;
+    : undefined) || matchingSeedCatalogs[0];
 
   const handleSeedCategoryChange = (category: string) => {
-    const firstSubcategory = uniqueSorted(Array.from(seedCategoryMap.get(category) || []))[0] || '';
+    const firstSubcategory = seededSubcategoryOptions.find(family =>
+      seededInventoryCatalog.find(catalog => catalog.family === family)?.variants.some(seed => seed.category === category)
+    ) || uniqueSorted(Array.from(seedCategoryMap.get(category) || []))[0] || '';
     const matchingVariants = getSeededVariants(category, firstSubcategory);
     const firstVariant = matchingVariants[0];
 
@@ -1771,8 +1877,34 @@ export function InventoryPage({
       setFormError('Enter product name or seeded identity, brand, and category.');
       return false;
     }
-    if (!addItemForm.buyingPrice || !addItemForm.retailPrice) {
+    const hasBulkVariantStock = selectedSeedCatalog?.variants.some(seed => {
+      const key = getSeedVariantKey(seed);
+      return (addItemForm.drawerVariantStocks[key] || '').trim() !== '';
+    });
+    const bulkVariantMissingPrice = selectedSeedCatalog?.variants.some(seed => {
+      const key = getSeedVariantKey(seed);
+      const stockText = addItemForm.drawerVariantStocks[key] || '';
+      if (!stockText.trim()) return false;
+      const retailText = addItemForm.drawerVariantRetailPrices[key] || addItemForm.retailPrice;
+      return !retailText || Number(retailText) <= 0;
+    });
+    const bulkVariantMissingCost = selectedSeedCatalog?.variants.some(seed => {
+      const key = getSeedVariantKey(seed);
+      const stockText = addItemForm.drawerVariantStocks[key] || '';
+      if (!stockText.trim()) return false;
+      const costText = addItemForm.drawerVariantCostPrices[key] || addItemForm.buyingPrice;
+      return !costText || Number(costText) < 0;
+    });
+    if (!hasBulkVariantStock && (!addItemForm.buyingPrice || !addItemForm.retailPrice)) {
       setFormError('Enter buying price and retail price.');
+      return false;
+    }
+    if (hasBulkVariantStock && bulkVariantMissingPrice) {
+      setFormError('Enter a retail price for each stocked variant, or enter one main retail price and apply it to all.');
+      return false;
+    }
+    if (hasBulkVariantStock && bulkVariantMissingCost) {
+      setFormError('Enter a cost price for each stocked variant, or enter one main cost price and apply it to all.');
       return false;
     }
     if (activeSuppliers.length > 0 && !addItemForm.supplierId) {
@@ -1780,7 +1912,15 @@ export function InventoryPage({
       return false;
     }
     if (addItemForm.trackExpiry && !addItemForm.expiryDate) {
-      setFormError('Enter the expiry date for this item.');
+      const message = 'Enter the expiry date for this item.';
+      setFormError(message);
+      setAddItemFieldErrors({ expiryDate: message });
+      return false;
+    }
+    if (addItemForm.trackExpiry && addItemForm.expiryDate < new Date().toISOString().slice(0, 10)) {
+      const message = 'Expiry date cannot be in the past.';
+      setFormError(message);
+      setAddItemFieldErrors({ expiryDate: message });
       return false;
     }
     if (isQuantifiableUnit(addItemForm.uom) && addItemForm.quantityLevels.some(level => !level.retailPrice || Number(level.retailPrice) <= 0)) {
@@ -1814,7 +1954,7 @@ export function InventoryPage({
       ...previousForm,
       name: '',
       sku: previousForm.sku || createSeedSku(seed),
-      barcode: previousForm.barcode || createGeneratedCode([seed.family, seed.brand, seed.size]),
+      barcode: '',
       category: seed.category,
       brand: seed.brand,
       parentProduct: seed.family,
@@ -1838,6 +1978,41 @@ export function InventoryPage({
     }));
   };
 
+  const updateDrawerVariantValue = (
+    field: 'drawerVariantRetailPrices' | 'drawerVariantCostPrices' | 'drawerVariantWholesalePrices',
+    seed: InventoryVariantSeed,
+    value: string
+  ) => {
+    setAddItemForm(previousForm => ({
+      ...previousForm,
+      [field]: {
+        ...previousForm[field],
+        [getSeedVariantKey(seed)]: value
+      }
+    }));
+  };
+
+  const fillDrawerVariantPrices = () => {
+    if (!selectedSeedCatalog) return;
+    setAddItemForm(previousForm => {
+      const retailPrices = { ...previousForm.drawerVariantRetailPrices };
+      const costPrices = { ...previousForm.drawerVariantCostPrices };
+      const wholesalePrices = { ...previousForm.drawerVariantWholesalePrices };
+      selectedSeedCatalog.variants.forEach(seed => {
+        const key = getSeedVariantKey(seed);
+        if (previousForm.retailPrice) retailPrices[key] = previousForm.retailPrice;
+        if (previousForm.buyingPrice) costPrices[key] = previousForm.buyingPrice;
+        if (previousForm.wholesalePrice) wholesalePrices[key] = previousForm.wholesalePrice;
+      });
+      return {
+        ...previousForm,
+        drawerVariantRetailPrices: retailPrices,
+        drawerVariantCostPrices: costPrices,
+        drawerVariantWholesalePrices: wholesalePrices
+      };
+    });
+  };
+
   const buildProductFromForm = (
     overrides: Partial<Product> & {
       name?: string;
@@ -1849,18 +2024,24 @@ export function InventoryPage({
       packSize?: string;
       uom?: string;
       stock?: number;
+      retailPrice?: number;
+      wholesalePrice?: number;
+      buyingPrice?: number;
       reorderLevel?: number;
     } = {}
   ): Product => {
     const itemName = overrides.name || buildInventoryItemName(addItemForm);
     const parentProduct = overrides.parentProduct || resolvePosFamilyFromForm(addItemForm, itemName);
     const sku = overrides.sku || addItemForm.sku || createGeneratedCode([overrides.brand || addItemForm.brand, overrides.parentProduct || addItemForm.parentProduct || itemName]);
+    const barcode = overrides.barcode === undefined
+      ? addItemForm.barcode.trim() || undefined
+      : overrides.barcode;
     const selectedSupplier = suppliers.find(supplier => String(supplier.id) === addItemForm.supplierId);
-    const retailPrice = Number(addItemForm.retailPrice) || 0;
-    const wholesalePrice = Number(addItemForm.wholesalePrice) || retailPrice;
+    const retailPrice = overrides.retailPrice ?? (Number(addItemForm.retailPrice) || 0);
+    const wholesalePrice = overrides.wholesalePrice ?? (Number(addItemForm.wholesalePrice) || retailPrice);
     const corporatePrice = Number(addItemForm.corporatePrice) || wholesalePrice || retailPrice;
     const loyalPrice = Number(addItemForm.loyalPrice) || retailPrice;
-    const buyingPrice = Number(addItemForm.buyingPrice) || 0;
+    const buyingPrice = overrides.buyingPrice ?? (Number(addItemForm.buyingPrice) || 0);
     const uom = overrides.uom || addItemForm.uom;
     const quantityLevels = isQuantifiableUnit(uom)
       ? addItemForm.quantityLevels.map(level => ({
@@ -1879,7 +2060,7 @@ export function InventoryPage({
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       name: itemName,
       sku,
-      barcode: overrides.barcode || addItemForm.barcode.trim() || undefined,
+      barcode,
       category: addItemForm.category,
       brand: overrides.brand || addItemForm.brand,
       parentProduct,
@@ -1920,18 +2101,25 @@ export function InventoryPage({
 
     const stockedDrawerVariants = selectedSeedCatalog?.variants
       .map(seed => {
+        const key = getSeedVariantKey(seed);
         const stockText = addItemForm.drawerVariantStocks[getSeedVariantKey(seed)] || '';
+        const retailText = addItemForm.drawerVariantRetailPrices[key] || addItemForm.retailPrice;
+        const costText = addItemForm.drawerVariantCostPrices[key] || addItemForm.buyingPrice;
+        const wholesaleText = addItemForm.drawerVariantWholesalePrices[key] || addItemForm.wholesalePrice || retailText;
         return {
           seed,
           stockText,
-          stock: Number(stockText)
+          stock: Number(stockText),
+          retailPrice: Number(retailText),
+          buyingPrice: Number(costText),
+          wholesalePrice: Number(wholesaleText)
         };
       })
       .filter(item => item.stockText.trim() !== '' && Number.isFinite(item.stock) && item.stock >= 0) || [];
 
     try {
       if (stockedDrawerVariants.length > 0) {
-        for (const { seed, stock } of stockedDrawerVariants) {
+        for (const { seed, stock, retailPrice, buyingPrice, wholesalePrice } of stockedDrawerVariants) {
           await onAddItem(buildProductFromForm({
             name: [seed.brand, seed.family, seed.itemType, seed.size, seed.color, seed.packSize].filter(Boolean).join(' '),
             sku: createSeedSku(seed),
@@ -1942,6 +2130,9 @@ export function InventoryPage({
             packSize: [seed.size, seed.packSize].filter(Boolean).join(' / ') || seed.uom,
             uom: seed.uom,
             stock,
+            retailPrice,
+            buyingPrice,
+            wholesalePrice,
             reorderLevel: Number(addItemForm.reorderLevel) || seed.reorderLevel
           }));
         }
@@ -1967,7 +2158,7 @@ export function InventoryPage({
     <div className="space-y-6">
       <section className="space-y-3">
         <p className="text-sm font-semibold text-gray-900">Basic Information</p>
-        <Input placeholder="Product name" value={addItemForm.name} onChange={(event) => updateAddItemField('name', event.target.value)} className={addItemInputClass('name')} />
+        <Input placeholder="Product name" value={addItemForm.name} onChange={(event) => updateAddItemName(event.target.value)} className={addItemInputClass('name')} />
         <div className="flex gap-2">
           <Input placeholder="SKU" value={addItemForm.sku} onChange={(event) => updateAddItemField('sku', event.target.value)} className={addItemInputClass('sku')} />
           <Button type="button" variant="outline" onClick={() => setAddItemForm({ ...addItemForm, sku: createGeneratedCode([addItemForm.brand, addItemForm.parentProduct || addItemForm.name]) })}>
@@ -1991,7 +2182,10 @@ export function InventoryPage({
         <p className="text-sm font-semibold text-gray-900">Product Details</p>
         <Input placeholder="Product family / POS group (e.g. Milk, Sugar, Shirts)" value={addItemForm.parentProduct} onChange={(event) => setAddItemForm({ ...addItemForm, parentProduct: event.target.value })} className="bg-gray-100 border-gray-200" />
         <div className="flex flex-wrap gap-2">
-          {seededInventoryCatalog.map(catalog => (
+          {uniqueInOrder([...matchingSeedCatalogs.map(catalog => catalog.family), ...seededInventoryCatalog.map(catalog => catalog.family)]).map(family => {
+            const catalog = seededInventoryCatalog.find(seedCatalog => seedCatalog.family === family);
+            if (!catalog) return null;
+            return (
             <Button
               key={catalog.family}
               type="button"
@@ -2002,7 +2196,8 @@ export function InventoryPage({
             >
               {catalog.family}
             </Button>
-          ))}
+            );
+          })}
         </div>
         {selectedSeedCatalog && (
           <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
@@ -2141,7 +2336,24 @@ export function InventoryPage({
             <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">Product Name <span className="text-red-500">*</span></label>
-                <Input placeholder="Enter product name" value={addItemForm.name} onChange={(event) => setAddItemForm({ ...addItemForm, name: event.target.value })} className="bg-gray-100 border-gray-200" />
+                <Input placeholder="Enter product name" value={addItemForm.name} onChange={(event) => updateAddItemName(event.target.value)} className={addItemInputClass('name')} />
+                {matchingSeedCatalogs.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {matchingSeedCatalogs.slice(0, 6).map(catalog => (
+                      <Button
+                        key={catalog.family}
+                        type="button"
+                        variant={addItemForm.parentProduct === catalog.family ? 'default' : 'outline'}
+                        size="sm"
+                        className={addItemForm.parentProduct === catalog.family ? 'h-7 bg-blue-600 px-2 text-xs hover:bg-blue-700' : 'h-7 bg-white px-2 text-xs'}
+                        onClick={() => handleSeedSubcategoryChange(catalog.family)}
+                      >
+                        {catalog.family}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+                {addItemFieldErrors.name && <p className="text-xs font-medium text-red-600">{addItemFieldErrors.name}</p>}
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-gray-700">SKU / Barcode <span className="text-red-500">*</span></label>
@@ -2215,31 +2427,66 @@ export function InventoryPage({
                 <div className="space-y-3 rounded-md border border-gray-200 bg-gray-50 p-3 lg:col-span-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="text-sm font-semibold text-gray-900">Drawer variants</p>
-                      <p className="text-xs text-gray-500">Enter opening stock for each SKU you want added under this POS group.</p>
+                      <p className="text-sm font-semibold text-gray-900">Bulk variants by quantity</p>
+                      <p className="text-xs text-gray-500">Add stock and prices for each brand, pack, or size under {selectedSeedCatalog.family}.</p>
                     </div>
-                    <Badge variant="outline">{selectedSeedCatalog.variants.length} options</Badge>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={fillDrawerVariantPrices}>
+                        Apply main prices
+                      </Button>
+                      <Badge variant="outline">{selectedSeedCatalog.variants.length} options</Badge>
+                    </div>
                   </div>
-                  <div className="grid max-h-80 gap-2 overflow-y-auto pr-1 xl:grid-cols-2">
+                  <div className="max-h-96 overflow-y-auto pr-1">
+                    <div className="min-w-[760px] space-y-2">
+                      <div className="grid grid-cols-[minmax(180px,1fr)_90px_110px_110px_110px] gap-2 px-2 text-xs font-semibold uppercase text-gray-500">
+                        <span>Variant</span>
+                        <span>Stock</span>
+                        <span>Cost</span>
+                        <span>Retail</span>
+                        <span>Wholesale</span>
+                      </div>
                     {selectedSeedCatalog.variants.map(seed => (
-                      <div key={getSeedVariantKey(seed)} className="grid grid-cols-[minmax(0,1fr)_120px] gap-3 rounded-md border border-gray-200 bg-white p-3">
+                      <div key={getSeedVariantKey(seed)} className="grid grid-cols-[minmax(180px,1fr)_90px_110px_110px_110px] gap-2 rounded-md border border-gray-200 bg-white p-2">
                         <button type="button" onClick={() => applySeededVariant(seed)} className="min-w-0 text-left">
                           <p className="truncate text-sm font-medium text-gray-900">{seed.brand} {seed.itemType}</p>
                           <p className="mt-1 truncate text-xs text-gray-500">{[seed.size, seed.color, seed.packSize, seed.variation].filter(Boolean).join(' / ') || seed.uom}</p>
                         </button>
-                        <div>
-                          <label className="text-xs font-medium text-gray-500">Stock</label>
-                          <Input
-                            type="number"
-                            min="0"
-                            placeholder="0"
-                            value={addItemForm.drawerVariantStocks[getSeedVariantKey(seed)] || ''}
-                            onChange={(event) => updateDrawerVariantStock(seed, event.target.value)}
-                            className="mt-1 bg-gray-100 border-gray-200"
-                          />
-                        </div>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={addItemForm.drawerVariantStocks[getSeedVariantKey(seed)] || ''}
+                          onChange={(event) => updateDrawerVariantStock(seed, event.target.value)}
+                          className="bg-gray-100 border-gray-200"
+                        />
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder={addItemForm.buyingPrice || '0.00'}
+                          value={addItemForm.drawerVariantCostPrices[getSeedVariantKey(seed)] || ''}
+                          onChange={(event) => updateDrawerVariantValue('drawerVariantCostPrices', seed, event.target.value)}
+                          className="bg-gray-100 border-gray-200"
+                        />
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder={addItemForm.retailPrice || '0.00'}
+                          value={addItemForm.drawerVariantRetailPrices[getSeedVariantKey(seed)] || ''}
+                          onChange={(event) => updateDrawerVariantValue('drawerVariantRetailPrices', seed, event.target.value)}
+                          className="bg-gray-100 border-gray-200"
+                        />
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder={addItemForm.wholesalePrice || addItemForm.retailPrice || '0.00'}
+                          value={addItemForm.drawerVariantWholesalePrices[getSeedVariantKey(seed)] || ''}
+                          onChange={(event) => updateDrawerVariantValue('drawerVariantWholesalePrices', seed, event.target.value)}
+                          className="bg-gray-100 border-gray-200"
+                        />
                       </div>
                     ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -2461,9 +2708,10 @@ export function InventoryPage({
                   <Input
                     type="date"
                     value={addItemForm.expiryDate}
-                    onChange={(event) => setAddItemForm({ ...addItemForm, expiryDate: event.target.value })}
-                    className="bg-gray-100 border-gray-200"
+                    onChange={(event) => updateAddItemField('expiryDate', event.target.value)}
+                    className={addItemInputClass('expiryDate')}
                   />
+                  {addItemFieldErrors.expiryDate && <p className="text-xs font-medium text-red-600">{addItemFieldErrors.expiryDate}</p>}
                 </div>
               )}
               <label className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 p-3">
@@ -2584,6 +2832,15 @@ export function InventoryPage({
         </CardContent>
       </Card>
 
+      <Tabs defaultValue="stock" className="space-y-4">
+        <TabsList className="flex h-auto flex-wrap justify-start bg-white border-gray-200">
+          <TabsTrigger value="stock" className="data-[state=active]:bg-blue-600">Stock List</TabsTrigger>
+          <TabsTrigger value="trends" className="data-[state=active]:bg-blue-600">Trends</TabsTrigger>
+          <TabsTrigger value="reorder" className="data-[state=active]:bg-blue-600">Reorder & Activity</TabsTrigger>
+          <TabsTrigger value="records" className="data-[state=active]:bg-blue-600">Records</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="trends" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr_1fr]">
         <Card className="bg-white border-gray-200 shadow-sm">
           <CardHeader className="pb-2">
@@ -2648,7 +2905,9 @@ export function InventoryPage({
           </CardContent>
         </Card>
       </div>
+        </TabsContent>
 
+        <TabsContent value="reorder" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="space-y-4">
           <div className="flex flex-wrap gap-2">
@@ -2753,7 +3012,9 @@ export function InventoryPage({
           </Card>
         </div>
       </div>
+        </TabsContent>
 
+        <TabsContent value="stock" className="space-y-4">
       <Card className="bg-white border-gray-200 shadow-sm">
         <CardHeader className="border-b border-gray-200 pb-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2916,7 +3177,9 @@ export function InventoryPage({
           )}
         </CardContent>
       </Card>
+        </TabsContent>
 
+        <TabsContent value="records" className="space-y-4">
       <Tabs defaultValue="history" className="space-y-4">
         <TabsList className="bg-white border-gray-200">
           <TabsTrigger value="history" className="data-[state=active]:bg-blue-600">Inventory History</TabsTrigger>
@@ -3155,6 +3418,8 @@ export function InventoryPage({
           </div>
         </TabsContent>
       </Tabs>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={isMoreFiltersOpen} onOpenChange={setIsMoreFiltersOpen}>
         <DialogContent className="bg-white border-gray-200 max-w-lg">
@@ -3344,17 +3609,19 @@ export function InventoryPage({
           }
         }}
       >
-        <DialogContent className="bg-white border-gray-200 max-w-3xl">
-          <DialogHeader><DialogTitle>Goods Receiving Note</DialogTitle></DialogHeader>
+        <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto border-gray-200 bg-white p-0">
+          <DialogHeader className="border-b border-gray-100 px-6 py-4">
+            <DialogTitle>Goods Receiving Note</DialogTitle>
+          </DialogHeader>
           {pendingGrnRequest && (
-            <div className="space-y-4">
-              <div className="rounded-md border border-green-200 bg-green-50 p-3">
+            <div className="space-y-5 px-6 py-5">
+              <div className="rounded-md border border-green-200 bg-green-50 px-4 py-3">
                 <p className="font-semibold text-green-900">GRN linked to purchase order</p>
-                <p className="text-sm text-green-700">
+                <p className="mt-1 break-words text-sm text-green-700">
                   Reference: {'id' in pendingGrnRequest ? pendingGrnRequest.id : pendingGrnRequest.goodsReceivingNote || 'PO Draft'} | {pendingGrnRequest.supplierName} | {pendingGrnRequest.date}
                 </p>
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-gray-700">GRN Reference</label>
                   <Input
@@ -3377,9 +3644,10 @@ export function InventoryPage({
                   <label className="text-sm font-medium text-gray-700">Receiving Location</label>
                   <Input
                     value={grnDetails.receivingLocation}
-                    onChange={(event) => setGrnDetails(previous => ({ ...previous, receivingLocation: event.target.value }))}
-                    className="bg-white border-gray-200"
+                    readOnly
+                    className="bg-gray-100 border-gray-200 text-gray-600"
                   />
+                  <p className="text-xs text-gray-500">Receiving location is controlled by the store/warehouse setup.</p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-gray-700">Receiving Notes</label>
@@ -3392,30 +3660,60 @@ export function InventoryPage({
                 </div>
               </div>
               <div className="rounded-md border border-gray-200">
-                <div className="grid grid-cols-[1fr_100px_140px] gap-3 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
-                  <span>Item</span>
-                  <span>Requested</span>
-                  <span>Received</span>
+                <div className="border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600">
+                  Items to receive
                 </div>
                 {(pendingGrnRequest.orderItems || []).map(item => (
-                  <div key={item.productId} className="grid grid-cols-[1fr_100px_140px] gap-3 border-b border-gray-100 px-3 py-3 text-sm last:border-b-0">
-                    <div>
+                  <div key={item.productId} className="space-y-3 border-b border-gray-100 px-4 py-3 text-sm last:border-b-0">
+                    <div className="min-w-0">
                       <p className="font-medium text-gray-900">{item.productName}</p>
-                      <p className="text-xs text-gray-500">{item.sku || item.productId} | Supplier SKU: {item.supplierSku || '-'}</p>
+                      <p className="mt-1 break-words text-xs text-gray-500">{item.sku || item.productId} | Supplier SKU: {item.supplierSku || '-'}</p>
                     </div>
-                    <p className="self-center text-gray-700">{item.requestedQuantity}</p>
-                    <Input
-                      type="number"
-                      min="0"
-                      max={item.requestedQuantity}
-                      value={grnReceivedQuantities[item.productId] || ''}
-                      onChange={(event) => setGrnReceivedQuantities(previous => ({ ...previous, [item.productId]: event.target.value }))}
-                      className="h-8 bg-white border-gray-200"
-                    />
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <div className="rounded-md bg-gray-50 px-3 py-2">
+                        <p className="text-xs text-gray-500">Requested</p>
+                        <p className="font-semibold text-gray-900">{item.requestedQuantity}</p>
+                      </div>
+                      <div className="rounded-md bg-orange-50 px-3 py-2">
+                        <p className="text-xs text-orange-700">Pending</p>
+                        <p className="font-semibold text-orange-700">{item.pendingQuantity ?? Math.max(0, item.requestedQuantity - item.deliveredQuantity)}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">Good condition</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={item.pendingQuantity ?? Math.max(0, item.requestedQuantity - item.deliveredQuantity)}
+                          value={grnReceivedQuantities[item.productId] || ''}
+                          onChange={(event) => setGrnReceivedQuantities(previous => ({ ...previous, [item.productId]: event.target.value }))}
+                          className="h-9 bg-white border-gray-200 text-right"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-gray-600">Rejected</label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max={item.pendingQuantity ?? Math.max(0, item.requestedQuantity - item.deliveredQuantity)}
+                          value={grnRejectedQuantities[item.productId] || ''}
+                          onChange={(event) => setGrnRejectedQuantities(previous => ({ ...previous, [item.productId]: event.target.value }))}
+                          className="h-9 bg-white border-gray-200 text-right"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-600">Rejection reason</label>
+                      <Input
+                        placeholder="Bad condition, expired..."
+                        value={grnRejectionReasons[item.productId] || ''}
+                        onChange={(event) => setGrnRejectionReasons(previous => ({ ...previous, [item.productId]: event.target.value }))}
+                        className="h-9 bg-white border-gray-200"
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <div className="flex flex-col-reverse gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:justify-end">
                 <Button
                   type="button"
                   variant="outline"
@@ -3426,14 +3724,22 @@ export function InventoryPage({
                 </Button>
                 <Button
                   type="button"
-                  className="flex-1 bg-green-600 text-white hover:bg-green-700"
+                  className="bg-green-600 text-white hover:bg-green-700 sm:w-64"
                   disabled={isPostingGrn}
                   onClick={async () => {
                   if (isPostingGrn) return;
                   const verifiedItems = (pendingGrnRequest.orderItems || []).map(item => {
-                    const deliveredQuantity = Math.max(0, Math.min(item.requestedQuantity, Number(grnReceivedQuantities[item.productId] || item.requestedQuantity) || 0));
+                    const alreadyDelivered = item.deliveredQuantity || 0;
+                    const pendingQuantity = item.pendingQuantity ?? Math.max(0, item.requestedQuantity - alreadyDelivered);
+                    const rejectedQuantity = Math.max(0, Math.min(pendingQuantity, Number(grnRejectedQuantities[item.productId] || 0) || 0));
+                    const maximumAccepted = Math.max(0, pendingQuantity - rejectedQuantity);
+                    const receivedQuantity = Math.max(0, Math.min(maximumAccepted, Number(grnReceivedQuantities[item.productId] || maximumAccepted) || 0));
+                    const deliveredQuantity = alreadyDelivered + receivedQuantity;
                     return {
                       ...item,
+                      receivedQuantity,
+                      rejectedQuantity,
+                      rejectionReason: grnRejectionReasons[item.productId]?.trim() || undefined,
                       deliveredQuantity,
                       pendingQuantity: Math.max(0, item.requestedQuantity - deliveredQuantity)
                     };
@@ -3444,28 +3750,34 @@ export function InventoryPage({
                     });
                     return;
                   }
-                  if (!verifiedItems.some(item => item.deliveredQuantity > 0)) {
+                  if (!verifiedItems.some(item => (item.receivedQuantity || 0) > 0 || (item.rejectedQuantity || 0) > 0)) {
                     toast.error('Enter received quantity', {
-                      description: 'At least one item must have a received quantity greater than zero.'
+                      description: 'At least one item must have an accepted or rejected quantity greater than zero.'
                     });
                     return;
                   }
                   setIsPostingGrn(true);
                   try {
+                    const quantityPending = verifiedItems.reduce((sum, item) => sum + item.pendingQuantity, 0);
                     await onReceivedAndVerified({
                       ...pendingGrnRequest,
-                      status: 'delivered',
+                      status: quantityPending > 0 ? 'pending' : 'delivered',
                       goodsReceivingNote: grnDetails.goodsReceivingNote.trim() || pendingGrnRequest.goodsReceivingNote || `GRN-${Date.now()}`,
                       deliveryNote: grnDetails.deliveryNote.trim() || pendingGrnRequest.deliveryNote,
                       receivingLocation: grnDetails.receivingLocation.trim() || 'Main Store',
-                      receivingNotes: grnDetails.receivingNotes.trim() || undefined,
+                      receivingNotes: [
+                        grnDetails.receivingNotes.trim(),
+                        ...verifiedItems
+                          .filter(item => (item.rejectedQuantity || 0) > 0)
+                          .map(item => `${item.productName}: rejected ${item.rejectedQuantity}${item.rejectionReason ? ` (${item.rejectionReason})` : ''}`)
+                      ].filter(Boolean).join(' | ') || undefined,
                       quantityDelivered: verifiedItems.reduce((sum, item) => sum + item.deliveredQuantity, 0),
-                      quantityPending: verifiedItems.reduce((sum, item) => sum + item.pendingQuantity, 0),
+                      quantityPending,
                       orderItems: verifiedItems
                     });
                     pushNotification(
                       'Stock received',
-                      verifiedItems.map(item => `${item.productName} +${item.deliveredQuantity}`).join(', '),
+                      verifiedItems.filter(item => (item.receivedQuantity || 0) > 0).map(item => `${item.productName} +${item.receivedQuantity}`).join(', '),
                       'green'
                     );
                   } catch (error) {

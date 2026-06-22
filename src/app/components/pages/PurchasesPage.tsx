@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Plus, Search, Eye, FileText, PackageCheck } from 'lucide-react';
 import type { SupplierOrderInvoice } from '../../types/supplierOrder';
+import { formatCurrency } from '../utils/helpers';
 
 interface PurchasesPageProps {
   supplierInvoices: SupplierOrderInvoice[];
@@ -31,6 +32,8 @@ type PurchaseRow = {
   orderItems: NonNullable<SupplierOrderInvoice['orderItems']>;
   invoice: SupplierOrderInvoice;
 };
+
+const hasReceivableItems = (purchase: PurchaseRow) => purchase.pendingItems > 0 || purchase.status !== 'delivered';
 
 export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -186,7 +189,7 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
               <div>
                 <p className="text-gray-500 text-sm">This Month</p>
                 <p className="text-2xl font-semibold text-gray-900">
-                  KSh {pagePurchases.reduce((sum, p) => sum + p.amount, 0).toFixed(0)}
+                  {formatCurrency(pagePurchases.reduce((sum, p) => sum + p.amount, 0))}
                 </p>
               </div>
               <div className="p-2 bg-green-500/20 rounded-lg">
@@ -282,7 +285,7 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
                   <TableCell className="text-blue-600 font-medium">{purchase.id}</TableCell>
                   <TableCell className="text-gray-900">{purchase.supplier}</TableCell>
                   <TableCell className="text-gray-600">{purchase.date}</TableCell>
-                  <TableCell className="text-green-600">KSh {purchase.amount.toFixed(2)}</TableCell>
+                  <TableCell className="text-green-600">{formatCurrency(purchase.amount)}</TableCell>
                   <TableCell className="text-gray-600">{purchase.requestedItems}</TableCell>
                   <TableCell className="text-green-600">{purchase.deliveredItems}</TableCell>
                   <TableCell className={purchase.pendingItems > 0 ? 'text-orange-600' : 'text-gray-600'}>{purchase.pendingItems}</TableCell>
@@ -300,7 +303,7 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
                   <TableCell>{getStatusBadge(purchase.status)}</TableCell>
                   <TableCell>
                     <div className="flex gap-2">
-                      {purchase.status !== 'delivered' && (
+                      {hasReceivableItems(purchase) && (
                         <Button
                           size="sm"
                           className="bg-green-600 text-white hover:bg-green-700"
@@ -361,7 +364,7 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
                 </div>
                 <div>
                   <p className="text-gray-500">Total Amount</p>
-                  <p className="font-medium text-gray-900">KSh {selectedPurchase.amount.toFixed(2)}</p>
+                  <p className="font-medium text-gray-900">{formatCurrency(selectedPurchase.amount)}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Requested</p>
@@ -387,7 +390,7 @@ export function PurchasesPage({ supplierInvoices, onReceiveGoods }: PurchasesPag
                     <div key={`${item.productId}-${item.productName}`} className="grid gap-3 border-b border-gray-200 px-3 py-2 last:border-b-0 sm:grid-cols-[1fr_auto]">
                       <div>
                         <p className="font-medium text-gray-900">{item.productName}</p>
-                        <p className="text-xs text-gray-500">{item.sku || item.supplierSku || 'No SKU'} | KSh {item.unitCost.toFixed(2)}</p>
+                        <p className="text-xs text-gray-500">{item.sku || item.supplierSku || 'No SKU'} | {formatCurrency(item.unitCost)}</p>
                       </div>
                       <div className="text-xs text-gray-600 sm:text-right">
                         <p>Requested: {item.requestedQuantity}</p>

@@ -75,6 +75,12 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
   const filteredSupplierInvoices = supplierInvoices.filter(invoice => toDate(invoice.date) >= startDate);
 
   const revenue = filteredSales.reduce((sum, sale) => sum + sale.amount, 0);
+  const taxCollected = filteredSales.reduce((saleSum, sale) => saleSum + sale.items.reduce((itemSum, item) => {
+    const fallbackTax = products.find(product => product.id === item.productId)?.tax || 0;
+    const taxRate = Number(item.tax ?? fallbackTax) || 0;
+    return itemSum + (taxRate > 0 ? item.total * (taxRate / (100 + taxRate)) : 0);
+  }, 0), 0);
+  const revenueExcludingTax = Math.max(0, revenue - taxCollected);
   const expenseTotal = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
   const supplierSpend = filteredSupplierInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
   const transactions = filteredSales.length;
@@ -167,7 +173,7 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
   }, [filteredSales, filteredExpenses, filteredSupplierInvoices]);
 
   const keyMetrics = [
-    { title: 'Total Revenue', value: formatCurrency(revenue), change: `${transactions} completed sales`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-500/20' },
+    { title: 'Tax-Inclusive Revenue', value: formatCurrency(revenue), change: `${transactions} completed sales`, icon: DollarSign, color: 'text-green-600', bg: 'bg-green-500/20' },
     { title: 'Total Transactions', value: String(transactions), change: `${formatCurrency(averageOrderValue)} avg order`, icon: ShoppingCart, color: 'text-blue-600', bg: 'bg-blue-500/20' },
     { title: 'Gross Profit', value: formatCurrency(grossProfit), change: `${formatCurrency(expenseTotal)} expenses`, icon: TrendingUp, color: grossProfit >= 0 ? 'text-purple-600' : 'text-red-600', bg: 'bg-purple-500/20' },
     { title: 'Unique Customers', value: String(uniqueCustomers), change: `${formatCurrency(outstandingSupplierBalance)} supplier balance`, icon: Users, color: 'text-orange-600', bg: 'bg-orange-500/20' }
@@ -178,6 +184,8 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
       label: 'All Accounts',
       rows: [
         ['Revenue', formatCurrency(revenue)],
+        ['Revenue excluding tax', formatCurrency(revenueExcludingTax)],
+        ['Tax collected', formatCurrency(taxCollected)],
         ['Transactions', String(transactions)],
         ['Average order value', formatCurrency(averageOrderValue)],
         ['Expenses', formatCurrency(expenseTotal)],
@@ -190,6 +198,8 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
       label: 'Sales Account',
       rows: [
         ['Revenue', formatCurrency(revenue)],
+        ['Revenue excluding tax', formatCurrency(revenueExcludingTax)],
+        ['Tax collected', formatCurrency(taxCollected)],
         ['Completed sales', String(transactions)],
         ['Average order value', formatCurrency(averageOrderValue)],
         ['Unique customers', String(uniqueCustomers)]
@@ -237,6 +247,8 @@ export function ReportsPage({ products, completedSales, expenses, supplierInvoic
         title: `${summary.label} Report`,
         summary: {
           Revenue: formatCurrency(revenue),
+          'Revenue excluding tax': formatCurrency(revenueExcludingTax),
+          'Tax collected': formatCurrency(taxCollected),
           Expenses: formatCurrency(expenseTotal),
           Profit: formatCurrency(grossProfit),
           Period: dateRange.replace('days', ' days').replace('months', ' months')

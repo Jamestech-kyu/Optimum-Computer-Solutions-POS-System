@@ -9,6 +9,7 @@ import { Textarea } from '../ui/textarea';
 import { Plus, Search, Edit, Eye, Phone, Mail, MapPin } from 'lucide-react';
 import type { BackendCustomer, CreateCustomerInput } from '../../services/api';
 import type { CompletedSale } from './POSPageEnhanced';
+import { formatCurrency } from '../utils/helpers';
 
 interface CustomersPageProps {
   customers: BackendCustomer[];
@@ -227,7 +228,7 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
         <Card className="bg-white border-gray-200">
           <CardContent className="p-4">
             <p className="text-gray-500 text-sm">Average Spent</p>
-            <p className="text-2xl font-semibold text-gray-900">KSh {(totalSpent / Math.max(displayCustomers.length, 1)).toFixed(0)}</p>
+            <p className="text-2xl font-semibold text-gray-900">{formatCurrency(totalSpent / Math.max(displayCustomers.length, 1))}</p>
           </CardContent>
         </Card>
         <Card className="bg-white border-gray-200">
@@ -292,7 +293,7 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
                   <TableCell className="text-gray-600">{customer.full_address || customer.city || 'Not captured'}</TableCell>
                   <TableCell className="text-gray-600">{customer.tax_number || 'None'}</TableCell>
                   <TableCell className="text-yellow-700">{customer.loyalty_points}</TableCell>
-                  <TableCell className="text-green-700">KSh {numberValue(customer.total_spent).toFixed(2)}</TableCell>
+                  <TableCell className="text-green-700">{formatCurrency(numberValue(customer.total_spent))}</TableCell>
                   <TableCell>{getPricingTier(customer.pricing_tier)}</TableCell>
                   <TableCell>
                     <Badge className={customer.is_blacklisted ? 'bg-red-500/20 text-red-700' : customer.is_active ? 'bg-green-500/20 text-green-700' : 'bg-gray-500/20 text-gray-700'}>
@@ -339,7 +340,7 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
                 <div><p className="text-gray-500">Postal Code</p><p className="text-gray-900 font-semibold">{selectedCustomer.postal_code || 'Not captured'}</p></div>
                 <div><p className="text-gray-500">Tax Number</p><p className="text-gray-900 font-semibold">{selectedCustomer.tax_number || 'None'}</p></div>
                 <div><p className="text-gray-500">Loyalty Points</p><p className="text-yellow-700 font-semibold">{selectedCustomer.loyalty_points}</p></div>
-                <div><p className="text-gray-500">Total Spent</p><p className="text-green-700 font-semibold">KSh {numberValue(selectedCustomer.total_spent).toFixed(2)}</p></div>
+                <div><p className="text-gray-500">Total Spent</p><p className="text-green-700 font-semibold">{formatCurrency(numberValue(selectedCustomer.total_spent))}</p></div>
                 <div><p className="text-gray-500">Discount</p><p className="text-gray-900 font-semibold">{selectedCustomer.discount_percentage ?? 0}%</p></div>
                 <div><p className="text-gray-500">Last Purchase</p><p className="text-gray-900 font-semibold">{formatDate(selectedCustomer.last_purchase_date)}</p></div>
                 <div className="md:col-span-2"><p className="text-gray-500">Notes</p><p className="text-gray-900">{selectedCustomer.notes || 'No notes captured'}</p></div>
@@ -363,7 +364,7 @@ export function CustomersPage({ customers, completedSales, openAddCustomerSignal
                             <p className="text-xs text-gray-500">{sale.timestamp.toLocaleString()}</p>
                           </div>
                           <div className="text-right">
-                            <p className="font-semibold text-green-700">KSh {sale.amount.toFixed(2)}</p>
+                            <p className="font-semibold text-green-700">{formatCurrency(sale.amount)}</p>
                             <p className="text-xs text-gray-500">{sale.items.length} item{sale.items.length === 1 ? '' : 's'}</p>
                           </div>
                         </div>

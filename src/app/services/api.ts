@@ -24,6 +24,7 @@ interface PaginatedResponse<T> {
 interface BackendProduct {
   id: number;
   sku: string;
+  barcode?: string | null;
   name: string;
   description?: string;
   generic_name?: string | null;
@@ -541,6 +542,7 @@ const mapProductFromApi = (product: BackendProduct): POSProduct => ({
   id: String(product.id),
   name: product.name,
   sku: product.sku,
+  barcode: product.barcode || undefined,
   category: product.category_name || 'Uncategorized',
   brand: product.brand || readMetadataValue(product.notes, 'Brand') || readMetadataValue(product.description, 'Brand') || product.supplier_sku || undefined,
   parentProduct: product.generic_name || readMetadataValue(product.notes, 'Parent Product') || readMetadataValue(product.description, 'Parent Product'),
@@ -664,6 +666,8 @@ const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrd
     : [];
   const requestedQuantity = orderItems.reduce((sum, item) => sum + item.requestedQuantity, 0) || itemQuantity;
   const deliveredQuantity = orderItems.reduce((sum, item) => sum + item.deliveredQuantity, 0);
+  const pendingQuantity = Math.max(0, requestedQuantity - deliveredQuantity);
+  const mappedStatus = mapPurchaseOrderStatus(invoice.status);
 
   return {
     id: invoice.invoice_number || invoice.po_number || `SUP-INV-${invoice.id.toString().padStart(3, '0')}`,
@@ -674,9 +678,10 @@ const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrd
     contact: invoice.contact || '',
     date: (invoice.order_date || invoice.created_at || new Date().toISOString()).slice(0, 10),
     amount: toNumber(invoice.amount ?? invoice.total),
-    status: mapPurchaseOrderStatus(invoice.status),
+    status: pendingQuantity > 0 && deliveredQuantity > 0 ? 'pending' : mappedStatus,
     items: Array.isArray(invoice.items) ? invoice.items.length : invoice.items,
     paymentMethod: invoice.payment_method || invoice.payment_status || 'pending',
+    paymentStatus: invoice.payment_status || invoice.payment_method || 'unpaid',
     deliveryNote: invoice.delivery_note || invoice.tracking_number || undefined,
     goodsReceivingNote: invoice.tracking_number || undefined,
     orderItems,
@@ -684,8 +689,24 @@ const mapSupplierInvoiceFromApi = (invoice: BackendSupplierInvoice): SupplierOrd
     productName: firstItem?.product_name,
     quantityRequested: requestedQuantity || undefined,
     quantityDelivered: deliveredQuantity || undefined,
-    quantityPending: Math.max(0, requestedQuantity - deliveredQuantity) || undefined
+    quantityPending: pendingQuantity || undefined
   };
+};
+
+export const updateSupplierInvoicePaymentStatus = async (
+  invoice: SupplierOrderInvoice,
+  paymentStatus: NonNullable<SupplierOrderInvoice['paymentStatus']>
+) => {
+  if (!invoice.backendId) return invoice;
+
+  const response = await request<BackendSupplierInvoice>(`/inventory/purchase-orders/${invoice.backendId}/`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      payment_status: paymentStatus
+    })
+  });
+
+  return mapSupplierInvoiceFromApi(response);
 };
 
 const mapNotificationFromApi = (notification: BackendNotification): BackendNotification => {
@@ -1359,7 +1380,7 @@ export const receiveAndVerifySupplierInvoice = async (invoice: SupplierOrderInvo
 
   const receivePayload = (receivableInvoice.orderItems || [])
     .map(item => {
-      const quantity = item.deliveredQuantity || 0;
+      const quantity = item.receivedQuantity ?? item.deliveredQuantity ?? 0;
       return item.purchaseOrderItemId && quantity > 0 ? {
         item_id: item.purchaseOrderItemId,
         quantity,
@@ -1370,6 +1391,9 @@ export const receiveAndVerifySupplierInvoice = async (invoice: SupplierOrderInvo
     .filter(Boolean);
 
   if (receivePayload.length === 0) {
+    if ((receivableInvoice.orderItems || []).some(item => (item.rejectedQuantity || 0) > 0)) {
+      return receivableInvoice;
+    }
     throw new Error('No receivable purchase order items were found for this GRN.');
   }
 

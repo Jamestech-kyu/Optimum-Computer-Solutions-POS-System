@@ -1,7 +1,6 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
-import { Plus, ShoppingCart, Package, Users, Trophy } from 'lucide-react';
 import { formatCurrency } from './utils/helpers';
 import type { CompletedSale } from './pages/POSPageEnhanced';
 import type { UserRole } from '../types/auth';
@@ -18,31 +17,26 @@ interface QuickActionsProps {
 const quickActions: Array<{
   id: QuickActionId;
   label: string;
-  icon: typeof ShoppingCart;
   className: string;
 }> = [
   {
     id: 'new-sale',
     label: 'New Sale',
-    icon: ShoppingCart,
     className: 'bg-blue-600 hover:bg-blue-700'
   },
   {
     id: 'add-product',
     label: 'Add Product',
-    icon: Package,
     className: 'bg-green-600 hover:bg-green-700'
   },
   {
     id: 'add-customer',
     label: 'Add Customer',
-    icon: Users,
     className: 'bg-purple-600 hover:bg-purple-700'
   },
   {
     id: 'quick-invoice',
     label: 'Quick Invoice',
-    icon: Plus,
     className: 'bg-orange-600 hover:bg-orange-700'
   }
 ];
@@ -89,30 +83,22 @@ export function QuickActions({ completedSales, userRole, onAction }: QuickAction
           <CardTitle className="text-gray-900">Quick Actions</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {availableActions.map((action) => {
-            const Icon = action.icon;
-
-            return (
-              <Button
-                key={action.id}
-                className={`w-full justify-start text-white ${action.className}`}
-                onClick={() => onAction(action.id)}
-              >
-                <Icon className="w-4 h-4 mr-2" />
-                {action.label}
-              </Button>
-            );
-          })}
+          {availableActions.map((action) => (
+            <Button
+              key={action.id}
+              className={`w-full justify-center text-white ${action.className}`}
+              onClick={() => onAction(action.id)}
+            >
+              {action.label}
+            </Button>
+          ))}
         </CardContent>
       </Card>
 
       {/* Staff Leaderboard */}
       <Card className="bg-white border-gray-200 lg:col-span-2">
         <CardHeader>
-          <CardTitle className="text-gray-900 flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-yellow-600" />
-            Today's Top Sellers
-          </CardTitle>
+          <CardTitle className="text-gray-900">Today's Top Sellers</CardTitle>
         </CardHeader>
         <CardContent>
           {staffData.length > 0 ? (
@@ -144,7 +130,6 @@ export function QuickActions({ completedSales, userRole, onAction }: QuickAction
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-8 text-center bg-gray-50 rounded-lg">
-              <Trophy className="w-8 h-8 text-gray-300 mb-2" />
               <p className="text-sm font-medium text-gray-900">No sellers ranked yet today</p>
               <p className="text-xs text-gray-500 mt-1">Complete a sale and this list will update automatically.</p>
             </div>

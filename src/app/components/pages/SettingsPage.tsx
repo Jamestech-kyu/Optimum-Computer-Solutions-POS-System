@@ -8,7 +8,6 @@ import { Switch } from '../ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Separator } from '../ui/separator';
 import { Badge } from '../ui/badge';
-import { Barcode, Bell, Building, CreditCard, Database, FileText, Globe, Percent, QrCode, ScanBarcode, Settings, Shield } from 'lucide-react';
 import { TaxConfig } from '../TaxConfig';
 import { getStoredAppSettings, saveAppSettings, type AppLanguage } from '../../services/settings';
 import { loadAppSettings, saveBackendAppSettings } from '../../services/api';
@@ -110,10 +109,7 @@ export function SettingsPage() {
         <TabsContent value="business">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <Building className="w-5 h-5" />
-                Business Information
-              </CardTitle>
+              <CardTitle className="text-gray-900">Business Information</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -146,10 +142,7 @@ export function SettingsPage() {
         <TabsContent value="invoice">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Invoice Configuration
-              </CardTitle>
+              <CardTitle className="text-gray-900">Invoice Configuration</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -182,10 +175,7 @@ export function SettingsPage() {
         <TabsContent value="payment">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <CreditCard className="w-5 h-5" />
-                Payment Methods
-              </CardTitle>
+              <CardTitle className="text-gray-900">Payment Methods</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               {paymentMethods.map((method, index) => (
@@ -205,10 +195,7 @@ export function SettingsPage() {
         <TabsContent value="pos">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <Settings className="w-5 h-5" />
-                POS Configuration Levels
-              </CardTitle>
+              <CardTitle className="text-gray-900">POS Configuration Levels</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -240,8 +227,7 @@ export function SettingsPage() {
               <div className="space-y-3">
                 <h4 className="text-gray-900 font-medium">POS Devices & Receipt Codes</h4>
                 <div className="flex items-center justify-between rounded-lg bg-gray-100 p-4">
-                  <div className="flex items-center gap-3">
-                    <ScanBarcode className="h-5 w-5 text-gray-600" />
+                  <div>
                     <div>
                       <p className="text-gray-900">Enable barcode scanner input in POS</p>
                       <p className="text-gray-500 text-sm">Scan or type SKU/barcode values to add products to the cart.</p>
@@ -250,8 +236,7 @@ export function SettingsPage() {
                   <Switch checked={posSettings.scannerEnabled} onCheckedChange={(checked) => setPosSettings({ ...posSettings, scannerEnabled: checked })} />
                 </div>
                 <div className="flex items-center justify-between rounded-lg bg-gray-100 p-4">
-                  <div className="flex items-center gap-3">
-                    <Barcode className="h-5 w-5 text-gray-600" />
+                  <div>
                     <div>
                       <p className="text-gray-900">Print barcode on receipt</p>
                       <p className="text-gray-500 text-sm">Adds a transaction barcode to every receipt.</p>
@@ -260,8 +245,7 @@ export function SettingsPage() {
                   <Switch checked={posSettings.receiptBarcodeEnabled} onCheckedChange={(checked) => setPosSettings({ ...posSettings, receiptBarcodeEnabled: checked })} />
                 </div>
                 <div className="flex items-center justify-between rounded-lg bg-gray-100 p-4">
-                  <div className="flex items-center gap-3">
-                    <QrCode className="h-5 w-5 text-gray-600" />
+                  <div>
                     <div>
                       <p className="text-gray-900">Print QR code on receipt</p>
                       <p className="text-gray-500 text-sm">Adds a transaction reference block to receipts.</p>
@@ -282,10 +266,7 @@ export function SettingsPage() {
         <TabsContent value="tax">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <Percent className="w-5 h-5" />
-                Tax Configuration
-              </CardTitle>
+              <CardTitle className="text-gray-900">Tax Configuration</CardTitle>
             </CardHeader>
             <CardContent>
               <TaxConfig />
@@ -296,10 +277,7 @@ export function SettingsPage() {
         <TabsContent value="system">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <Globe className="w-5 h-5" />
-                System Preferences
-              </CardTitle>
+              <CardTitle className="text-gray-900">System Preferences</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -354,10 +332,7 @@ export function SettingsPage() {
               <Separator className="bg-gray-600" />
 
               <div className="space-y-4">
-                <h4 className="text-gray-900 font-medium flex items-center gap-2">
-                  <Bell className="w-4 h-4" />
-                  Notifications
-                </h4>
+                <h4 className="text-gray-900 font-medium">Notifications</h4>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -379,10 +354,7 @@ export function SettingsPage() {
               <Separator className="bg-gray-600" />
 
               <div className="space-y-4">
-                <h4 className="text-gray-900 font-medium flex items-center gap-2">
-                  <Database className="w-4 h-4" />
-                  Data Management
-                </h4>
+                <h4 className="text-gray-900 font-medium">Data Management</h4>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-900">Automatic Backup</p>
@@ -400,10 +372,7 @@ export function SettingsPage() {
         <TabsContent value="security">
           <Card className="bg-white border-gray-200">
             <CardHeader>
-              <CardTitle className="text-gray-900 flex items-center gap-2">
-                <Shield className="w-5 h-5" />
-                Security & Access
-              </CardTitle>
+              <CardTitle className="text-gray-900">Security & Access</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-4">

@@ -78,6 +78,7 @@ class ProductImageSerializer(serializers.ModelSerializer):
 
 
 class ProductSerializer(serializers.ModelSerializer):
+    barcode = serializers.CharField(required=False, allow_blank=True, allow_null=True, validators=[])
     category_name = serializers.SerializerMethodField()
     category_name_input = serializers.CharField(write_only=True, required=False, allow_blank=True)
     supplier_name = serializers.SerializerMethodField()
@@ -133,8 +134,11 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def validate_barcode(self, value):
         barcode = (value or '').strip()
-        if barcode and Product.objects.filter(barcode=barcode).exists():
-            raise serializers.ValidationError("This barcode already exists. Clear it or generate a new barcode.")
+        queryset = Product.objects.filter(barcode=barcode)
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if barcode and queryset.exists():
+            return ''
         return barcode
 
     def _apply_category_name(self, validated_data):
@@ -321,10 +325,10 @@ class ProductSerializer(serializers.ModelSerializer):
             instance = super().create(validated_data)
         except IntegrityError as error:
             if 'barcode' in str(error).lower():
-                raise serializers.ValidationError({
-                    'barcode': 'This barcode already exists. Clear it or generate a new barcode.'
-                }) from error
-            raise
+                validated_data['barcode'] = ''
+                instance = super().create(validated_data)
+            else:
+                raise
         self._apply_image_data(instance, image_data)
         self._sync_inventory_records(instance, previous_stock=0)
         self._create_opening_batch(instance, expiry_date)

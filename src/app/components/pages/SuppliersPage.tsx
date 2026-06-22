@@ -5,6 +5,7 @@ import { Input } from '../ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Badge } from '../ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { Textarea } from '../ui/textarea';
 import {
   Activity,
@@ -28,7 +29,8 @@ import {
   Send,
   Truck,
   Upload,
-  Wallet
+  Wallet,
+  X
 } from 'lucide-react';
 import { formatCurrency } from '../utils/helpers';
 import { ReorderRequest, SupplierOrderInvoice, SupplierOrderStatus } from '../../types/supplierOrder';
@@ -623,6 +625,32 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
     )));
   };
 
+  const getProductsForSupplier = (supplier?: SupplierSummary | null) => {
+    if (!supplier) return products;
+    const linkedProducts = products.filter(product =>
+      product.supplierId === supplier.id || product.supplierName === supplier.name
+    );
+    return linkedProducts.length > 0 ? linkedProducts : products;
+  };
+
+  const addOrderLine = (productId?: string) => {
+    const supplierProducts = getProductsForSupplier(orderSupplier);
+    const selectedProduct = supplierProducts.find(product => product.id === productId)
+      || supplierProducts.find(product => !orderLines.some(line => line.productId === product.id))
+      || supplierProducts[0];
+
+    if (!selectedProduct) return;
+
+    setOrderLines(previousLines => [
+      ...previousLines,
+      buildPurchaseOrderLine(selectedProduct, getSuggestedReorderQuantity(selectedProduct))
+    ]);
+  };
+
+  const removeOrderLine = (index: number) => {
+    setOrderLines(previousLines => previousLines.filter((_, lineIndex) => lineIndex !== index));
+  };
+
   const orderLineItems = orderLines.map(line => {
     const requestedQuantity = Math.max(0, Number(line.requestedQuantity) || 0);
     const deliveredQuantity = orderForm.status === 'delivered'
@@ -641,9 +669,20 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
   const orderTotal = orderLineItems.reduce((sum, line) => sum + line.lineTotal, 0);
   const orderRequestedQuantity = orderLineItems.reduce((sum, line) => sum + line.requestedQuantity, 0);
   const orderDeliveredQuantity = orderLineItems.reduce((sum, line) => sum + line.deliveredQuantity, 0);
+  const orderHasValidLines = orderLineItems.length > 0 && orderLineItems.every(line =>
+    line.productId && line.requestedQuantity > 0 && line.unitCost >= 0
+  );
+  const orderSupplierProducts = getProductsForSupplier(orderSupplier);
+  const availableOrderProducts = orderSupplierProducts.filter(product =>
+    !orderLines.some(line => line.productId === product.id)
+  );
 
   const handleEmailSupplier = () => {
     if (!orderSupplier) return;
+    if (!orderHasValidLines) {
+      alert('Add at least one product with a valid quantity before sending the purchase order.');
+      return;
+    }
     if (onSupplierOrderSent) {
       setIsSendingPurchaseOrder(true);
       onSupplierOrderSent(buildOrderInvoice('requested'))
@@ -1206,20 +1245,27 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                         <TableCell>{getBalanceBadge(getSupplierSummary(supplier).balance)}</TableCell>
                         <TableCell className="text-gray-600">{getSupplierSummary(supplier).lastPurchase}</TableCell>
                         <TableCell>
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="ghost" className="text-orange-600 hover:text-orange-300" onClick={() => openOrderDialog(supplier)}>
-                              <PackagePlus className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="text-blue-600 hover:text-blue-300" onClick={() => setSelectedSupplier(supplier)}>
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="text-green-600 hover:text-green-300">
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="text-gray-500 hover:text-gray-900">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-gray-500 hover:text-gray-900" aria-label={`Open actions for ${supplier.name}`}>
                               <MoreVertical className="w-4 h-4" />
-                            </Button>
-                          </div>
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44 bg-white">
+                              <DropdownMenuItem onClick={() => openOrderDialog(supplier)}>
+                                <PackagePlus className="h-4 w-4 text-orange-600" />
+                                Record Order
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setSelectedSupplier(supplier)}>
+                                <Eye className="h-4 w-4 text-blue-600" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <Edit className="h-4 w-4 text-green-600" />
+                                Edit Supplier
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1535,7 +1581,7 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                 <div>
                   <p className="text-gray-500 text-xs">Current Balance</p>
                   <p className={`font-semibold ${getSupplierSummary(selectedSupplier).balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    KSh {Math.abs(getSupplierSummary(selectedSupplier).balance).toFixed(2)}
+                    {formatCurrency(Math.abs(getSupplierSummary(selectedSupplier).balance))}
                   </p>
                 </div>
                 <div className="col-span-2">
@@ -1574,7 +1620,11 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                   value={orderSupplier.id}
                   onChange={(e) => {
                     const nextSupplier = suppliers.find(supplier => supplier.id === Number(e.target.value));
-                    if (nextSupplier) setOrderSupplier(nextSupplier);
+                    if (nextSupplier) {
+                      const nextProduct = getProductsForSupplier(nextSupplier)[0];
+                      setOrderSupplier(nextSupplier);
+                      setOrderLines(nextProduct ? [buildPurchaseOrderLine(nextProduct, getSuggestedReorderQuantity(nextProduct))] : []);
+                    }
                   }}
                   className="h-9 w-full rounded-md border border-gray-200 bg-gray-100 px-3 text-sm text-gray-900"
                 >
@@ -1602,31 +1652,72 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
               </div>
 
               <div className="rounded-md border border-gray-200">
-                <div className="flex flex-col gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-col gap-3 border-b border-gray-200 bg-gray-50 px-3 py-3 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-gray-900">PO Items Requested</p>
-                    <p className="text-xs text-gray-500">Review quantities and supplier prices before sending.</p>
+                    <p className="text-sm font-semibold text-gray-900">Bulky PO Items Requested</p>
+                    <p className="text-xs text-gray-500">Add several products from this supplier, then send one purchase order.</p>
                   </div>
-                  <Button type="button" className="bg-blue-600 text-white hover:bg-blue-700" onClick={handleEmailSupplier} disabled={isSendingPurchaseOrder || !orderSupplier.email}>
-                    <Send className="mr-2 h-4 w-4" />
-                    {isSendingPurchaseOrder ? 'Sending...' : 'Send to Supplier'}
-                  </Button>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <select
+                      value=""
+                      onChange={(event) => {
+                        if (event.target.value) addOrderLine(event.target.value);
+                      }}
+                      className="h-9 min-w-56 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-900"
+                    >
+                      <option value="">Add bulky item</option>
+                      {availableOrderProducts.map(product => (
+                        <option key={product.id} value={product.id}>
+                          {product.name} - {product.sku}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => addOrderLine()}
+                      disabled={availableOrderProducts.length === 0}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Item
+                    </Button>
+                    <Button type="button" className="bg-blue-600 text-white hover:bg-blue-700" onClick={handleEmailSupplier} disabled={isSendingPurchaseOrder || !orderSupplier.email || !orderHasValidLines}>
+                      <Send className="mr-2 h-4 w-4" />
+                      {isSendingPurchaseOrder ? 'Sending...' : 'Send to Supplier'}
+                    </Button>
+                  </div>
                 </div>
-                <div className="grid grid-cols-[1.5fr_.8fr_.9fr_.7fr_.8fr_.8fr] gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
+                <div className="grid grid-cols-[1.5fr_.8fr_.9fr_.7fr_.8fr_.8fr_44px] gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600">
                   <span>Item</span>
                   <span>SKU</span>
                   <span>Supplier SKU</span>
                   <span>Qty</span>
                   <span>Unit cost</span>
                   <span className="text-right">Total</span>
+                  <span />
                 </div>
                 <div className="max-h-72 overflow-y-auto">
                   {orderLines.map((line, index) => {
                     const calculatedLine = orderLineItems[index];
                     return (
-                      <div key={`${line.productId}-${index}`} className="grid grid-cols-[1.5fr_.8fr_.9fr_.7fr_.8fr_.8fr] gap-2 border-b border-gray-100 px-3 py-3 text-sm last:border-b-0">
+                      <div key={`${line.productId}-${index}`} className="grid grid-cols-[1.5fr_.8fr_.9fr_.7fr_.8fr_.8fr_44px] gap-2 border-b border-gray-100 px-3 py-3 text-sm last:border-b-0">
                         <div>
-                          <p className="font-medium text-gray-900">{line.productName}</p>
+                          <select
+                            value={line.productId}
+                            onChange={(event) => {
+                              const nextProduct = orderSupplierProducts.find(product => product.id === event.target.value);
+                              if (nextProduct) {
+                                updateOrderLine(index, buildPurchaseOrderLine(nextProduct, Number(line.requestedQuantity) || getSuggestedReorderQuantity(nextProduct)));
+                              }
+                            }}
+                            className="h-8 w-full rounded-md border border-gray-200 bg-white px-2 text-sm font-medium text-gray-900"
+                          >
+                            {orderSupplierProducts.map(product => (
+                              <option key={product.id} value={product.id}>
+                                {product.name}
+                              </option>
+                            ))}
+                          </select>
                           <p className="text-xs text-gray-500">{products.find(product => product.id === line.productId)?.supplierName || orderSupplier.name}</p>
                         </div>
                         <p className="self-center text-gray-600">{line.sku}</p>
@@ -1634,9 +1725,25 @@ export function SuppliersPage({ products, suppliers: backendSuppliers, supplierI
                         <Input type="number" min="1" value={line.requestedQuantity} onChange={(e) => updateOrderLine(index, { requestedQuantity: e.target.value })} className="h-8 bg-white border-gray-200" />
                         <Input type="number" min="0" step="0.01" value={line.unitCost} onChange={(e) => updateOrderLine(index, { unitCost: e.target.value })} className="h-8 bg-white border-gray-200" />
                         <p className="self-center text-right font-medium text-gray-900">{formatCurrency(calculatedLine?.lineTotal || 0)}</p>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-gray-500 hover:text-red-600"
+                          onClick={() => removeOrderLine(index)}
+                          disabled={orderLines.length === 1}
+                          aria-label={`Remove ${line.productName}`}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
                     );
                   })}
+                  {orderLines.length === 0 && (
+                    <div className="px-3 py-6 text-center text-sm text-gray-500">
+                      Add at least one item from {orderSupplier.name} to create this purchase order.
+                    </div>
+                  )}
                 </div>
               </div>
 

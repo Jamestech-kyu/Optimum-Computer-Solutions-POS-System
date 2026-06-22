@@ -9,6 +9,9 @@ export interface SupplierOrderItem {
   requestedQuantity: number;
   deliveredQuantity: number;
   pendingQuantity: number;
+  receivedQuantity?: number;
+  rejectedQuantity?: number;
+  rejectionReason?: string;
   unitCost: number;
 }
 
@@ -25,6 +28,12 @@ export interface SupplierOrderInvoice {
   items: number;
   orderItems?: SupplierOrderItem[];
   paymentMethod: string;
+  paymentStatus?: 'unpaid' | 'partial' | 'paid' | string;
+  paidAmount?: number;
+  paidAt?: string;
+  supplierPaymentMethod?: string;
+  paymentReference?: string;
+  paymentNotes?: string;
   deliveryNote?: string;
   goodsReceivingNote?: string;
   receivingLocation?: string;

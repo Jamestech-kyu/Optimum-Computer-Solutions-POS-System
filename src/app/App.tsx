@@ -18,7 +18,7 @@ import { UserRole } from './types/auth';
 import type { QuickActionId } from './components/QuickActions';
 import type { Product } from './components/pages/ProductsPageEnhanced';
 import { BusinessExpense, ReorderRequest, StockMovement, SupplierOrderInvoice } from './types/supplierOrder';
-import { approveUser, changePassword, clockInUser, clockOutUser, createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, receiveAndVerifySupplierInvoice, rejectUser, saveDayBalance, saveSale, saveSupplierInvoice, sendSupplierInvoiceToSupplier, updateProductStock, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
+import { approveUser, changePassword, clockInUser, clockOutUser, createCustomer, createProduct, createSupplier, deactivateUser, downloadAvailableProducts, downloadProductImportTemplate, hasStoredSession, importProductsFromExcel, loadBackendState, login as apiLogin, logout as apiLogout, registerAccount, receiveAndVerifySupplierInvoice, rejectUser, saveDayBalance, saveSale, saveSupplierInvoice, sendSupplierInvoiceToSupplier, updateProductStock, updateSupplierInvoicePaymentStatus, updateUser, verifyTwoFactor as apiVerifyTwoFactor } from './services/api';
 import type { BackendCustomer, BackendRole, BackendSupplier, BackendUser, CreateCustomerInput, LoginResult, RegistrationRole } from './services/api';
 import { toast } from 'sonner';
 import { canAccessModule, firstAccessibleModule, normalizeRole, type AppModuleId } from './services/permissions';
@@ -42,11 +42,36 @@ const mergeSupplierInvoices = (
   backendInvoices: SupplierOrderInvoice[]
 ) => {
   const backendIds = new Set(backendInvoices.map(invoice => invoice.id));
+  const currentByIdentity = new Map<string, SupplierOrderInvoice>();
+  currentInvoices.forEach(invoice => {
+    currentByIdentity.set(invoice.id, invoice);
+    if (invoice.backendId) {
+      currentByIdentity.set(`backend:${invoice.backendId}`, invoice);
+    }
+  });
+  const mergedBackendInvoices = backendInvoices.map(invoice => {
+    const localInvoice = currentByIdentity.get(invoice.id) || (
+      invoice.backendId ? currentByIdentity.get(`backend:${invoice.backendId}`) : undefined
+    );
+
+    return localInvoice
+      ? {
+          ...invoice,
+          paidAmount: localInvoice.paidAmount,
+          paidAt: localInvoice.paidAt,
+          supplierPaymentMethod: localInvoice.supplierPaymentMethod,
+          paymentReference: localInvoice.paymentReference,
+          paymentNotes: localInvoice.paymentNotes,
+          paymentStatus: localInvoice.paymentStatus || invoice.paymentStatus,
+          paymentMethod: localInvoice.paymentStatus || invoice.paymentStatus || invoice.paymentMethod
+        }
+      : invoice;
+  });
   const pendingLocalInvoices = currentInvoices.filter(invoice =>
     !backendIds.has(invoice.id) && invoice.status !== 'delivered'
   );
 
-  return [...backendInvoices, ...pendingLocalInvoices].sort((a, b) => b.date.localeCompare(a.date));
+  return [...mergedBackendInvoices, ...pendingLocalInvoices].sort((a, b) => b.date.localeCompare(a.date));
 };
 const getLocalNotificationId = (key: string) => {
   let hash = 0;
@@ -839,7 +864,8 @@ export default function App() {
 
   const applyReceivedStock = (invoice: SupplierOrderInvoice, deliveredItems: NonNullable<SupplierOrderInvoice['orderItems']>) => {
     const receivedQuantityByProduct = deliveredItems.reduce((totals, item) => {
-      totals.set(item.productId, (totals.get(item.productId) || 0) + item.deliveredQuantity);
+      const receivedQuantity = item.receivedQuantity ?? item.deliveredQuantity;
+      totals.set(item.productId, (totals.get(item.productId) || 0) + receivedQuantity);
       return totals;
     }, new Map<string, number>());
     const nextStockByProduct = products.reduce((stockMap, product) => {
@@ -869,7 +895,7 @@ export default function App() {
         id: `MOV-${invoice.id}-${item.productId}-${Date.now()}`,
         item: item.productName,
         type: 'in' as const,
-        quantity: item.deliveredQuantity,
+        quantity: item.receivedQuantity ?? item.deliveredQuantity,
         date: invoice.date,
         reason: `GRN ${invoice.goodsReceivingNote || invoice.id}`,
         sourceInvoiceId: invoice.id
@@ -881,12 +907,13 @@ export default function App() {
   };
 
   const handleInventoryReceivedAndVerified = async (invoice: SupplierOrderInvoice | Omit<SupplierOrderInvoice, 'id'>) => {
+    const quantityPending = (invoice.orderItems || []).reduce((sum, item) => sum + item.pendingQuantity, 0);
     const deliveredInvoice: SupplierOrderInvoice = {
       ...invoice,
       id: 'id' in invoice ? invoice.id : `SUP-INV-${Date.now()}`,
-      status: 'delivered'
+      status: quantityPending > 0 ? 'pending' : 'delivered'
     };
-    const deliveredItems = (deliveredInvoice.orderItems || []).filter(item => item.deliveredQuantity > 0);
+    const deliveredItems = (deliveredInvoice.orderItems || []).filter(item => (item.receivedQuantity ?? item.deliveredQuantity) > 0);
 
     if (isBackendConnected) {
       const savedInvoice = await receiveAndVerifySupplierInvoice(deliveredInvoice);
@@ -903,7 +930,7 @@ export default function App() {
       setSupplierInvoices(previousInvoices => {
         const receivedInvoice = {
           ...savedInvoice,
-          status: 'delivered' as const,
+          status: (savedInvoice.quantityPending || 0) > 0 ? 'pending' as const : 'delivered' as const,
           goodsReceivingNote: deliveredInvoice.goodsReceivingNote || savedInvoice.goodsReceivingNote,
           deliveryNote: deliveredInvoice.deliveryNote || savedInvoice.deliveryNote,
           receivingLocation: deliveredInvoice.receivingLocation,
@@ -922,7 +949,7 @@ export default function App() {
       setPendingInventoryGrn(null);
       pushLocalNotification(
         'Stock received',
-        deliveredItems.map(item => `${item.productName} +${item.deliveredQuantity} pcs posted to inventory`).join(', '),
+        deliveredItems.map(item => `${item.productName} +${item.receivedQuantity ?? item.deliveredQuantity} pcs posted to inventory`).join(', '),
         `stock-received:${savedInvoice.id}`
       );
       toast.success('Stock received and verified', {
@@ -944,7 +971,7 @@ export default function App() {
       applyReceivedStock(deliveredInvoice, deliveredItems);
       pushLocalNotification(
         'Stock received',
-        deliveredItems.map(item => `${item.productName} +${item.deliveredQuantity} pcs added to inventory`).join(', '),
+        deliveredItems.map(item => `${item.productName} +${item.receivedQuantity ?? item.deliveredQuantity} pcs added to inventory`).join(', '),
         `stock-received:${deliveredInvoice.id}`
       );
     }
@@ -952,7 +979,7 @@ export default function App() {
     setPendingInventoryGrn(null);
     toast.success('Stock received', {
       description: deliveredItems
-        .map(item => `${item.productName} +${item.deliveredQuantity}`)
+        .map(item => `${item.productName} +${item.receivedQuantity ?? item.deliveredQuantity}`)
         .join(', ')
     });
   };
@@ -1371,6 +1398,81 @@ export default function App() {
     ]);
   };
 
+  const handleSupplierInvoicePayment = async (
+    invoice: SupplierOrderInvoice,
+    payment: { amount: number; method: string; reference?: string; notes?: string }
+  ) => {
+    const currentInvoice = supplierInvoices.find(existingInvoice =>
+      existingInvoice.id === invoice.id || (
+        Boolean(existingInvoice.backendId) && existingInvoice.backendId === invoice.backendId
+      )
+    ) || invoice;
+    const previousPaidAmount = currentInvoice.paidAmount || 0;
+    const nextPaidAmount = Math.min(currentInvoice.amount, previousPaidAmount + payment.amount);
+    const nextPaymentStatus = nextPaidAmount >= currentInvoice.amount ? 'paid' : 'partial';
+    const paymentDate = getTodayKey();
+    const expenseId = `EXP-SUP-PAY-${currentInvoice.id}-${Date.now()}`;
+
+    setSupplierInvoices(previousInvoices => previousInvoices.map(existingInvoice => (
+      existingInvoice.id === currentInvoice.id || (
+        Boolean(existingInvoice.backendId) && existingInvoice.backendId === currentInvoice.backendId
+      )
+        ? {
+            ...existingInvoice,
+            paymentStatus: nextPaymentStatus,
+            paidAmount: nextPaidAmount,
+            paidAt: paymentDate,
+            supplierPaymentMethod: payment.method,
+            paymentReference: payment.reference,
+            paymentNotes: payment.notes,
+            paymentMethod: nextPaymentStatus
+          }
+        : existingInvoice
+    )));
+
+    setExpenses(previousExpenses => [
+      {
+        id: expenseId,
+        category: 'Supplier Payment',
+        description: [
+          `Payment to ${currentInvoice.supplierName}`,
+          currentInvoice.id,
+          payment.reference ? `Ref: ${payment.reference}` : ''
+        ].filter(Boolean).join(' - '),
+        amount: payment.amount,
+        date: paymentDate,
+        paymentMethod: payment.method,
+        receipt: true,
+        sourceInvoiceId: currentInvoice.id
+      },
+      ...previousExpenses
+    ]);
+
+    if (isBackendConnected) {
+      try {
+        const savedInvoice = await updateSupplierInvoicePaymentStatus(currentInvoice, nextPaymentStatus);
+        setSupplierInvoices(previousInvoices => previousInvoices.map(existingInvoice => (
+          existingInvoice.id === currentInvoice.id || (
+            Boolean(existingInvoice.backendId) && existingInvoice.backendId === savedInvoice.backendId
+          )
+            ? {
+                ...existingInvoice,
+                paymentStatus: savedInvoice.paymentStatus || nextPaymentStatus,
+                paymentMethod: savedInvoice.paymentStatus || nextPaymentStatus,
+                backendStatus: savedInvoice.backendStatus
+              }
+            : existingInvoice
+        )));
+      } catch (error) {
+        console.warn('Unable to update supplier payment status in backend.', error);
+      }
+    }
+
+    toast.success('Supplier payment recorded', {
+      description: `${formatCurrency(payment.amount)} paid to ${currentInvoice.supplierName}.`
+    });
+  };
+
   const handleOpenDay = (openingBalance: number) => {
     const nextDayBalance = {
       date: getTodayKey(),
@@ -1452,6 +1554,7 @@ export default function App() {
             openNewInvoiceSignal={quickActionSignals.newInvoice}
             onStartSale={() => setActiveItem('pos')}
             onRecordSupplierOrder={() => setActiveItem('procurement')}
+            onPaySupplierInvoice={handleSupplierInvoicePayment}
           />
         );
       case 'customers':
