@@ -1,4 +1,8 @@
-import pymysql
+try:
+    import pymysql
+except ImportError:  # pragma: no cover
+    pymysql = None
 
-pymysql.install_as_MySQLdb()
+if pymysql:
+    pymysql.install_as_MySQLdb()
 
