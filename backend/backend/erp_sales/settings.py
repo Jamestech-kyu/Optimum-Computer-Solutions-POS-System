@@ -15,6 +15,11 @@ from datetime import timedelta
 import os
 
 try:
+    import dj_database_url
+except ImportError:  # pragma: no cover
+    dj_database_url = None
+
+try:
     from decouple import config
 except ImportError:  # pragma: no cover
     # fallback if python-decouple isn't installed correctly
@@ -32,13 +37,22 @@ if os.path.exists(os.path.join(BASE_DIR, '.env')):
     load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 
+def env_bool(key, default=False):
+    value = str(config(key, default=str(default))).strip().lower()
+    return value in {'1', 'true', 'yes', 'y', 'on'}
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-your-secret-key-here-change-in-production'
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-your-secret-key-here-change-in-production')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env_bool('DEBUG', default=True)
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in config('ALLOWED_HOSTS', default='*').split(',')
+    if host.strip()
+]
 
 
 # Application definition
@@ -75,6 +89,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -107,9 +122,19 @@ ASGI_APPLICATION = 'erp_sales.asgi.application'
 
 
 # Database
-# Local development defaults to SQLite so the cloned backend can run without
-# requiring a preconfigured MySQL account. Set DB_ENGINE=mysql in .env to use MySQL.
-if config('DB_ENGINE', default='sqlite') == 'mysql':
+# Render and other hosts should provide DATABASE_URL. Local development defaults
+# to SQLite so the cloned backend can run without preconfigured database accounts.
+DATABASE_URL = config('DATABASE_URL', default='')
+
+if DATABASE_URL and dj_database_url:
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=not DEBUG,
+        )
+    }
+elif config('DB_ENGINE', default='sqlite') == 'mysql':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
@@ -214,7 +239,7 @@ SIMPLE_JWT = {
 
 
 # CORS
-CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = env_bool('CORS_ALLOW_ALL_ORIGINS', default=True)
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
@@ -223,16 +248,31 @@ CORS_ALLOWED_ORIGINS = [
     'http://127.0.0.1:8000',
 ]
 
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in config('CSRF_TRUSTED_ORIGINS', default='').split(',')
+    if origin.strip()
+]
+
 
 # Channels
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [('127.0.0.1', 6379)],
+REDIS_URL = config('REDIS_URL', default='')
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [REDIS_URL],
+            },
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 
 # EMAIL
