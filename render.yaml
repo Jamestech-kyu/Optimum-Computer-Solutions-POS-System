@@ -1,5 +1,6 @@
 databases:
   - name: pos-admin-db
+    plan: free
     databaseName: pos_admin
     user: pos_admin
 
@@ -7,6 +8,7 @@ services:
   - type: web
     name: pos-admin-api
     runtime: python
+    plan: free
     rootDir: backend
     buildCommand: "bash build.sh"
     startCommand: "cd backend && daphne -b 0.0.0.0 -p $PORT erp_sales.asgi:application"
