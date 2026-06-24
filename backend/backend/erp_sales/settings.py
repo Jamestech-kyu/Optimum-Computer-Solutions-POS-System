@@ -179,7 +179,7 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 STATICFILES_DIRS = [
@@ -239,13 +239,18 @@ SIMPLE_JWT = {
 
 
 # CORS
-CORS_ALLOW_ALL_ORIGINS = env_bool('CORS_ALLOW_ALL_ORIGINS', default=True)
+CORS_ALLOW_ALL_ORIGINS = env_bool('CORS_ALLOW_ALL_ORIGINS', default=DEBUG)
 CORS_ALLOW_CREDENTIALS = True
+default_cors_origins = (
+    'http://localhost:3000,'
+    'http://localhost:5173,'
+    'http://127.0.0.1:5173,'
+    'http://127.0.0.1:8000'
+)
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:8000',
+    origin.strip()
+    for origin in config('CORS_ALLOWED_ORIGINS', default=default_cors_origins).split(',')
+    if origin.strip()
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -291,19 +296,14 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='pos-admin@example.com
 
 
 # M-PESA
-MPESA_CONSUMER_KEY = '7EQf25u1ARJ1UYKHTUlb88eJUcYreiy0glUjfG95wjhNbHi8'
-MPESA_CONSUMER_SECRET = 'QRXIhxfz0ZIVd6IpAjZIvXf2fWEKLbKNCTtG6p5awrilexSRXTFXWLsYIU5tJJFf'
-MPESA_PASSKEY = 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919'
-MPESA_SHORTCODE = '174379'
-MPESA_ENVIRONMENT = 'sandbox'
-
-# Optional decouple-based config
 DARAJA_ENVIRONMENT = config('DARAJA_ENVIRONMENT', default='sandbox')
 MPESA_EXPRESS_SHORTCODE = config('MPESA_EXPRESS_SHORTCODE', default='174379')
 MPESA_CALLBACK_URL = config('MPESA_CALLBACK_URL', default='https://yourdomain.com/api/payments/mpesa-payments/callback/')
-MPESA_CONSUMER_KEY = config('MPESA_CONSUMER_KEY', default=MPESA_CONSUMER_KEY)
-MPESA_CONSUMER_SECRET = config('MPESA_CONSUMER_SECRET', default=MPESA_CONSUMER_SECRET)
-MPESA_PASSKEY = config('MPESA_PASSKEY', default=MPESA_PASSKEY)
+MPESA_CONSUMER_KEY = config('MPESA_CONSUMER_KEY', default='')
+MPESA_CONSUMER_SECRET = config('MPESA_CONSUMER_SECRET', default='')
+MPESA_PASSKEY = config('MPESA_PASSKEY', default='')
+MPESA_SHORTCODE = config('MPESA_SHORTCODE', default=MPESA_EXPRESS_SHORTCODE)
+MPESA_ENVIRONMENT = config('MPESA_ENVIRONMENT', default=DARAJA_ENVIRONMENT)
 MPESA_DEMO_MODE = config('MPESA_DEMO_MODE', default=False, cast=bool)
 
 
